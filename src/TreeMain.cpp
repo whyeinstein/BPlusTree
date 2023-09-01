@@ -15,7 +15,7 @@ int main()
         std::cout<<"输入MAX_KEYNUM"<<std::endl;
         int sss;
         std::cin>>sss;
-        MAX_DATANUM=MAX_POINTERNUM=MAX_KEYNUM=sss-1;
+        MAX_POINTERNUM=MAX_KEYNUM=sss-1;
         ORDER=sss/2;
         
         //建树
@@ -37,7 +37,7 @@ int main()
                 std::cin>>iKEY>>iValue;
                 while((iValue!=0)&&(iKEY!=0)) {
                     x.Insert(iKEY, iValue);
-                    std::cout<<"层序遍历"<<std::endl;
+                    std::cout<<"插入成功"<<std::endl;
                     x.LevelTraversal(x.GetRoot());
                     std::cout<<"输入键值对,（0,0）退出"<<std::endl;
                     std::cin>>iKEY>>iValue;
@@ -74,33 +74,32 @@ int main()
                 x.LevelTraversal(x.GetRoot());
                 break;
             case 5:
-                x.Insert(5,5);
-                x.Insert(8,8);
-                x.Insert(10,10);
-                x.Insert(12,12);
-                x.Insert(11,11);
-                x.Insert(17,17);
-                x.Insert(55,55);
-                x.Insert(9,9);
-                x.Insert(2,2);
-                x.Insert(7,7);
-                x.Insert(14,14);
-                x.Insert(56,56);
-                x.Insert(42,42);
-                x.Insert(1,1);
-                x.Insert(77,77);
-                x.Delete(12);
-                x.Delete(9);
-                x.Delete(5);
+                x.Insert(1,5);
+                x.Insert(5,8);
+                x.Insert(6,10);
+                x.Insert(2,12);
+                x.Insert(4,11);
+                x.Insert(8,17);
+                x.Insert(9,55);
+                x.Insert(12,9);
+                x.Insert(3,2);
                 x.LevelTraversal(x.GetRoot());
-                x.Delete(2);
+                x.Insert(55,7);
                 x.LevelTraversal(x.GetRoot());
-                x.Delete(55);
+                x.Insert(67,14);
+                x.Insert(13,56);
+                x.Insert(555,42);
+                x.Insert(666,1);
+                x.Insert(454,77);
                 x.LevelTraversal(x.GetRoot());
-                x.Delete(56);
-                x.LevelTraversal(x.GetRoot());
-                x.Delete(1);
-                x.LevelTraversal(x.GetRoot());
+
+                x.Insert(121,77);
+                x.Insert(22,77);
+                //x.Insert(45,77);
+                //x.Insert(56,77);
+
+
+
                 //x.Delete(11); 
                 break;
             case 6:

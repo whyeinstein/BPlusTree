@@ -14,7 +14,7 @@
 int ORDER =1;      //最小数目
 int MAX_KEYNUM =2 ;//最大键值
 int MAX_POINTERNUM =2 ;//最多指针数
-int MAX_DATANUM = 2;   //最大值数目
+
 
 /*-------------------------Node类定义---------------------------*/
 template<typename T>
@@ -341,10 +341,12 @@ T InterNode<T>::Split(InterNode<T>* pNode, T key)  //key是新插入的值，pNo
             this->GetPointer(i+1)->SetFather(pNode);       //将插入关键字所在节点的父亲指针设置为当前指针
 
             //关键字数目加1
-            //pNode->SetCount(pNode->GetCount()+1);
+            pNode->SetCount(pNode->GetCount()+1);
 
             this->m_KeyValues.erase(this->m_KeyValues.begin()+x);
             this->m_Childs.erase(this->m_Childs.begin()+x+1);
+            this->SetCount(this->GetCount()-1);
+
         }
 
         // 设置好Count个数
@@ -881,6 +883,9 @@ bool BPlusTree<foo>::InsertInterNode(InterNode<foo> *pNode, foo key, Node<foo> *
     {
         pBro->SetPointer(0,rightChild);
         rightChild->SetFather(pBro);
+        if (ORDER*2!=MAX_KEYNUM) {
+            pBro->SetCount(pBro->GetCount()-1);
+        }
     }
 
     //寻找当前中间节点的父亲节点（循环）
