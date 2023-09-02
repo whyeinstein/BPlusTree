@@ -10,12 +10,6 @@
 #include<map>
 #include <queue>
 
-
-int ORDER =1;      //最小数目
-int MAX_KEYNUM =2 ;//最大键值
-int MAX_POINTERNUM =2 ;//最多指针数
-
-
 /*-------------------------Node类定义---------------------------*/
 template<typename T>
 class Node{
@@ -46,15 +40,11 @@ public:
     bool Insert();
 
     //删除节点时寻找可以借的兄弟
-    Node<T>* GetBro(int &leftOrRight);
+    Node<T>* GetBro(int &leftOrRight,int ORDER);
 
-    //虚函数：获取修改键值（中间节点）或数据（叶子节点）
-    virtual T GetElement(int i){return 0;}
-    virtual void SetElement(int i,T value){}
+    virtual void SetChild(int i, Node* pointer) { }
+    virtual Node<T>* GetChild(int i){return NULL;} 
 
-    //虚函数（查找设置中间节点的孩子指针，在叶子节点中无意义）
-    virtual Node* GetPointer(int i) {return NULL;}
-    virtual void SetPointer(int i, Node* pointer) { }
 
     //虚函数：用于叶子节点获取value
     virtual T GetValues(int i){return 0;}
@@ -80,21 +70,18 @@ public:
     ~InterNode(){}
 
     Node<T>* GetChild(int i){return m_Childs[i];} //获取孩子指针
-    void SetChild(int i,Node<T>* child){m_Childs[i]=child;}//修改孩子指针
 
     bool Insert(T value, Node<T>* pNode); //中间节点插入函数（参数列表为插入的值和待插入节点指针）？？？
     bool InsertKey(T key);  //用于单独插入键值
 
     
     //虚函数（查找设置中间节点的孩子指针，在叶子节点中无意义）
-    Node<T>* GetPointer(int i);
-    void SetPointer(int i, Node<T>* pointer);
+    //Node<T>* GetPointer(int i);
+    void SetChild(int i, Node<T>* pointer);
 
 
     // 分裂结点 绑定继承类的基类指针会不会找不到该函数？？？
-	T Split(InterNode<T>* parentNode, T key); 
-
-
+	T Split(InterNode<T>* parentNode, T key, int MAX_KEYNUM,int ORDER); 
 
     //删除中间节点
     void Delete(T key);
@@ -102,7 +89,7 @@ public:
     void Combine(Node<T>* pNode);
 
     //移动
-    bool Borrow(InterNode<T>* pNode);
+    bool BorrowInterBro(InterNode<T>* pNode);
 
 
 private:
@@ -144,10 +131,6 @@ public:
 
 	T Split(LeafNode<T>* pNode); // 分裂结点
 
-    //虚函数：获取修改键值（中间节点）或数据（叶子节点）
-    virtual T GetElement(int i);
-    virtual void SetElement(int i,T value);
-
 private:
     LeafNode<T>* m_RightBro;  //右兄弟指针
     LeafNode<T>* m_LeftBro;   //左兄弟指针
@@ -165,11 +148,8 @@ public:
     {
         m_LeafHead=NULL;
         m_LeafTail=NULL;
-        m_Depth=0;
         m_Root=NULL;
     };//记得拿到外面去
-
-
 
     virtual ~BPlusTree(){};
 
@@ -190,10 +170,9 @@ public:
     //递归删除中间节点
     bool DelInterNode(InterNode<foo>* pNode, foo key);
     //更新父亲键值
-    void UpdateKey(foo key,Node<foo>* oldNode);
-
-    // 打印树
-    void PrintTree();
+    void UpdateKey(foo key,Node<foo>* oldNode,int x);
+    //删除时叶子节点借兄弟
+    bool BorrowLeafBro(LeafNode<foo>* oldNode,LeafNode<foo>* pBro,foo key,int leftOrRight );
 
     //层序遍历
     void LevelTraversal(Node<foo>* pNode);
@@ -204,20 +183,20 @@ public:
     // 获取和设置根结点
     Node<foo>* GetRoot(){ return m_Root; }
     void SetRoot(Node<foo>* root){ m_Root = root; }
-    // 获取和设置深度
-    int GetDepth(){ return m_Depth; }
-    void SetDepth(int depth){ m_Depth = depth; } 
-    // 深度加一
-    void IncDepth(){ m_Depth = m_Depth + 1; }
-    // 深度减一
-    void DecDepth(){  if (m_Depth > 0)  m_Depth = m_Depth - 1;  }
+
+    //获取设置最大最小值
+    void SetMaxKey(int i){ MAX_KEYNUM=i;}
+    int GetMaxKey(){ return MAX_KEYNUM;}
+    void SetMinKey(int i){ ORDER=i;}
+    int GetMinKey(){ return ORDER;}
 
 
 private:
     LeafNode<foo>* m_LeafHead;  //叶子节点链表表头
     LeafNode<foo>* m_LeafTail;  //叶子节点链表表尾
     Node<foo>* m_Root;  //根节点
-    int m_Depth;    //树的深度
+    int MAX_KEYNUM; //最大键值数
+    int ORDER;      //最小数目
 
 };
 
@@ -234,23 +213,9 @@ void Node<T>::ReplaceKeyValue(int i, T key){
 }
 
 /*----------------------InterNode函数定义------------------------*/
-//获取孩子指针
-template<typename T>
-Node<T>* InterNode<T>::GetPointer(int i){
-    if ((i >= 0 ) && (i <= MAX_POINTERNUM))  //？？？中间节点获取孩子指针，初始值为0
-    {
-        return GetChild(i);
-    }
-    else 
-    {
-        return NULL;
-    }
-
-}
-
 //设置孩子指针
 template<typename T>
-void InterNode<T>::SetPointer(int i, Node<T>* pointer){
+void InterNode<T>::SetChild(int i, Node<T>* pointer){
     m_Childs.insert(m_Childs.begin()+i,pointer);
 }
 
@@ -258,19 +223,13 @@ void InterNode<T>::SetPointer(int i, Node<T>* pointer){
 //中间节点插入操作
 template<typename T>
 bool InterNode<T>::Insert(T key,Node<T>* pNode){
-
-    //超过最大关键字数目，返回false
-    if(Node<T>::GetCount()>=MAX_KEYNUM){
-        return false;
-    }
-
     //插入
     int i=0,j=0;
     //找到在当前节点应该插入的位置
     for(i=0;(i<(Node<T>::GetCount()))&&(key > Node<T>::GetKeyValue(i));i++);   
 
     Node<T>::SetKeyValue(i, key);
-    SetPointer(i+1, pNode); //插入指针(在键值位置下一个)
+    SetChild(i+1, pNode); //插入指针(在键值位置下一个)
     pNode->SetFather(this);       //将插入关键字所在节点的父亲指针设置为当前指针
 
     //关键字数目加1,返回真
@@ -285,29 +244,18 @@ bool InterNode<T>::Insert(T key,Node<T>* pNode){
 //中间节点插入键
 template<typename T>
 bool InterNode<T>::InsertKey(T key){
-
-    //超过最大关键字数目，返回false
-    if(Node<T>::GetCount()>=MAX_KEYNUM){
-        return false;
-    }
-
     //插入
     int i=0,j=0;
     //找到在当前节点应该插入的位置
     for(i=0;(i<(Node<T>::GetCount()))&&(key > Node<T>::GetKeyValue(i));i++);   
-    //get(Node<T>::m_KeyValues[i]))&&(i<Node<T>::m_Count);i++);？？？
 
     Node<T>::SetKeyValue(i, key);
-
 
     //关键字数目加1,返回真
     Node<T>::SetCount(Node<T>::GetCount()+1);
     return true;
     
 }
-
-
-
 
 
 /* 分裂中间结点
@@ -320,7 +268,7 @@ bool InterNode<T>::InsertKey(T key){
 提出来的RetKey作用是便于后续插入到祖先结点
 */
 template<typename T>
-T InterNode<T>::Split(InterNode<T>* pNode, T key)  //key是新插入的值，pNode是分裂结点
+T InterNode<T>::Split(InterNode<T>* pNode, T key, int MAX_KEYNUM,int ORDER)  //key是新插入的值，pNode是分裂结点
 {
     int i = 0,j=0;
    
@@ -337,8 +285,8 @@ T InterNode<T>::Split(InterNode<T>* pNode, T key)  //key是新插入的值，pNo
 
             //插入
             pNode->SetKeyValue(m, this->GetKeyValue(i));//插入键值
-            pNode->SetPointer(m, this->GetPointer(i+1)); //插入指针(在键值位置下一个)
-            this->GetPointer(i+1)->SetFather(pNode);       //将插入关键字所在节点的父亲指针设置为当前指针
+            pNode->SetChild(m, this->GetChild(i+1)); //插入指针(在键值位置下一个)
+            this->GetChild(i+1)->SetFather(pNode);       //将插入关键字所在节点的父亲指针设置为当前指针
 
             //关键字数目加1
             pNode->SetCount(pNode->GetCount()+1);
@@ -383,8 +331,8 @@ T InterNode<T>::Split(InterNode<T>* pNode, T key)  //key是新插入的值，pNo
 
         //插入
         pNode->SetKeyValue(m, this->GetKeyValue(i));//插入键值
-        pNode->SetPointer(m, this->GetPointer(i)); //插入指针(在键值位置下一个)
-        this->GetPointer(i)->SetFather(pNode);       //将插入关键字所在节点的父亲指针设置为当前指针
+        pNode->SetChild(m, this->GetChild(i)); //插入指针(在键值位置下一个)
+        this->GetChild(i)->SetFather(pNode);       //将插入关键字所在节点的父亲指针设置为当前指针
 
         //关键字数目加1
         pNode->SetCount(pNode->GetCount()+1);
@@ -394,29 +342,25 @@ T InterNode<T>::Split(InterNode<T>* pNode, T key)  //key是新插入的值，pNo
     }
     
     //补上新节点中最后的指针并重新设置孩子的指针
-    pNode->SetPointer(MAX_KEYNUM - (position+1), this->GetPointer(MAX_KEYNUM));
-    this->GetPointer(MAX_KEYNUM)->SetFather(pNode);
+    pNode->SetChild(MAX_KEYNUM - (position+1), this->GetChild(MAX_KEYNUM));
+    this->GetChild(MAX_KEYNUM)->SetFather(pNode);
     // 把第position+1 -- 2V+1个指针移到指定的结点中(注意指针比键多一个)
     j=0;
     
-
     // 清除提取出的位置
     this->m_Childs.erase(this->m_Childs.begin()+position+1);
     this->m_KeyValues.erase(this->m_KeyValues.begin()+position);
 
-
     // 设置好Count个数
     this->SetCount(position);
     pNode->SetCount(MAX_KEYNUM - (position+1));
-
-
     return retKey;
 }
 
 
 //移动中间节点键值
 template<typename T>
-bool InterNode<T>::Borrow(InterNode<T>* pNode) {// 定义成InterNode而非Node？？？
+bool InterNode<T>::BorrowInterBro(InterNode<T>* pNode) {// 定义成InterNode而非Node？？？
     // 参数检查
     int i,j;
 
@@ -425,17 +369,17 @@ bool InterNode<T>::Borrow(InterNode<T>* pNode) {// 定义成InterNode而非Node�
     {
         // 赋值
         // 第一个键值不是兄弟结点的最后一个键值，而是本结点第一个子结点的叶子节点中的最小值
-        Node<T>* lNode=this->GetPointer(0);
+        Node<T>* lNode=this->GetChild(0);
         while (lNode->GetNodeType()!=2) {
-            lNode=lNode->GetPointer(0);
+            lNode=lNode->GetChild(0);
         }
         this->SetKeyValue(0, lNode->GetKeyValue(0));
 
         // 第一个子结点为兄弟结点的最后一个子结点
-        this->SetPointer(0, pNode->GetPointer(pNode->GetCount()));
+        this->SetChild(0, pNode->GetChild(pNode->GetCount()));
 
         //修改父亲节点
-        pNode->GetPointer(pNode->GetCount())->SetFather(this);
+        pNode->GetChild(pNode->GetCount())->SetFather(this);
 
         //更新本节点父亲节点键值
         LeafNode<T>* newLNode=(LeafNode<T>*)lNode;
@@ -461,17 +405,17 @@ bool InterNode<T>::Borrow(InterNode<T>* pNode) {// 定义成InterNode而非Node�
     {
         // 赋值
         // 最后一个键值不是兄弟结点的第一个键值，而是兄弟结点第一个子结点的叶子节点中的最小值
-        Node<T>* lNode=pNode->GetPointer(0);
+        Node<T>* lNode=pNode->GetChild(0);
         while (lNode->GetNodeType()!=2) {
-            lNode=lNode->GetPointer(0);
+            lNode=lNode->GetChild(0);
         }
         this->SetKeyValue(this->GetCount(), lNode->GetKeyValue(0));
 
         // 最后一个子结点为兄弟结点的第一个子结点
-        this->SetPointer(this->GetCount()+1, pNode->GetPointer(0));
+        this->SetChild(this->GetCount()+1, pNode->GetChild(0));
 
         //修改父亲节点
-        pNode->GetPointer(0)->SetFather(this);
+        pNode->GetChild(0)->SetFather(this);
 
         //更新兄弟节点父亲键值
         LeafNode<T>* newLNode=(LeafNode<T>*)lNode;
@@ -516,19 +460,19 @@ void InterNode<T>::Delete(T key)
 template<typename T>
 void InterNode<T>::Combine(Node<T>* pNode)
 {
-    Node<T>* lNode=pNode->GetPointer(0);
+    Node<T>* lNode=pNode->GetChild(0);
     while(lNode->GetNodeType()!=2) {
-        lNode=lNode->GetPointer(0);
+        lNode=lNode->GetChild(0);
     }
     // 取待合并结点的第一个孩子的第一个元素作为新键值
     T newKey = lNode->GetKeyValue(0);  
-    this->Insert(newKey, pNode->GetPointer(0));
+    this->Insert(newKey, pNode->GetChild(0));
   
 
 
     for (int i = 0; i < pNode->GetCount(); i++)
     {
-        this->Insert(pNode->GetKeyValue(i), pNode->GetPointer(i+1));
+        this->Insert(pNode->GetKeyValue(i), pNode->GetChild(i+1));
 
     }
 
@@ -542,32 +486,9 @@ LeafNode<T>::LeafNode(){
 
 }
 
-//获取值（虚函数版本）
-template<typename T>
-T LeafNode<T>::GetElement(int i){
-    if ((i >= 0 ) && (i <= MAX_POINTERNUM))
-    {
-        return GetValues(i);
-    }
-    else 
-    {
-        return NULL;  //warning: converting to non-pointer type ‘int’ from NULL [-Wconversion-null]
-    }
-}
-
-//设置值（虚函数版本）
-template<typename T>
-void LeafNode<T>::SetElement(int i , T value){
-    if ((i >= 0 ) && (i <= MAX_POINTERNUM))
-    {
-        SetValues(i, value);
-    }
-    
-}
-
 //获取兄弟节点
 template<typename T>
-Node<T>* Node<T>::GetBro(int &leftOrRight){
+Node<T>* Node<T>::GetBro(int &leftOrRight,int ORDER) {
     Node<T>* pFather = this->GetFather();   //获取其父结点指针
     Node<T>* pBro = NULL;  //记录获取到的兄弟指针
 
@@ -579,24 +500,24 @@ Node<T>* Node<T>::GetBro(int &leftOrRight){
     for (int i = 0; i <= pFather->GetCount() ; i++)   //GetCount()表示获取数据或关键字数，要比指针数小1。
     {
         // 找到本结点的位置
-        if (pFather->GetPointer(i) == this)
+        if (pFather->GetChild(i) == this)
         {
             if(i==0) {           //本身为第一个指针
-                pBro = pFather->GetPointer(i + 1);    // 优先找后一个指针
+                pBro = pFather->GetChild(i + 1);    // 优先找后一个指针
                 leftOrRight = 2;
             }
             else if (i == (pFather->GetCount()))   //表示其为父结点的最右边孩子。
             {
-                pBro = pFather->GetPointer(i - 1);    // 本身是最后一个指针，只能找前一个指针
+                pBro = pFather->GetChild(i - 1);    // 本身是最后一个指针，只能找前一个指针
                 leftOrRight = 1;
             }
-            else if((pFather->GetPointer(i + 1)->GetCount())>ORDER) //后一个兄弟能借
+            else if((pFather->GetChild(i + 1)->GetCount())>ORDER) //后一个兄弟能借
             {
-                pBro = pFather->GetPointer(i + 1);    // 优先找后一个指针
+                pBro = pFather->GetChild(i + 1);    // 优先找后一个指针
                 leftOrRight = 2;
             }
             else {     //后一个兄弟不能借，只能找前一个
-                pBro = pFather->GetPointer(i - 1);    
+                pBro = pFather->GetChild(i - 1);    
                 leftOrRight = 1;
             }
         }
@@ -638,7 +559,7 @@ T LeafNode<T>::Split(LeafNode<T>* pNode)
     {
         j++;
         //将原i位置上的元素删除并添加到新节点中
-        pNode->Insert(this->GetKeyValue(i),this->GetElement(i));
+        pNode->Insert(this->GetKeyValue(i),this->GetValues(i));
         this->m_KeyValues.pop_back();            //m_Keyvalues.erase(this->m_KeyValues.begin()+i);
         this->m_Values.pop_back();
     }    
@@ -712,7 +633,7 @@ bool BPlusTree<foo>::Search(foo data, char *sPath){
 
         // 找到第一个键值大于等于key的位置
         for (i = 1; (data >= pNode->m_KeyValues[i])&&(i <= pNode->GetCount()); i++);
-        pNode = pNode->GetPointer(i);  
+        pNode = pNode->GetChild(i);  
     }
 
     // 没找到
@@ -725,7 +646,7 @@ bool BPlusTree<foo>::Search(foo data, char *sPath){
     bool found = false;
     for (i = 1; i <= pNode->GetCount(); i++)
     {
-        if (data == pNode->GetElement(i))
+        if (data == pNode->GetValues(i))
         {
             found = true;
         }
@@ -751,7 +672,7 @@ LeafNode<foo>* BPlusTree<foo>::SearchLeafNode(foo key){
         //寻找大于value的第一个关键字
         for(i=0; (key >= pNode->GetKeyValue(i)) && (i < pNode->GetCount()) ;i++);  //？？？i=1？？？
 
-        pNode=pNode->GetPointer(i);
+        pNode=pNode->GetChild(i);
     }
     return (LeafNode<foo> *)pNode;   //向下强转？？？
 
@@ -773,7 +694,7 @@ LeafNode<foo>* BPlusTree<foo>::SearchDelNode(foo key,int &i){
         
         //寻找大于value的第一个关键字
         for(i=0; (key >= pNode->GetKeyValue(i)) && (i < pNode->GetCount()) ;i++);  //？？？i=1？？？
-        pNode=pNode->GetPointer(i);
+        pNode=pNode->GetChild(i);
     }
     if(pNode!=NULL)
     {
@@ -805,7 +726,6 @@ bool BPlusTree<foo>::Insert(foo key,uint64_t value){
         m_LeafHead=oldNode;
         m_LeafTail=oldNode;
         SetRoot(oldNode);
-        //std::cout<<value<<m_Depth;   调试
     }
 
     //插入
@@ -844,9 +764,9 @@ bool BPlusTree<foo>::Insert(foo key,uint64_t value){
     if (pFather==NULL)
     {
         pFather = new InterNode<foo>;               //为什么参考要用Node而不是InterNode？？？
-        pFather->SetPointer(0, oldNode);                   // 指针1指向原结点
+        pFather->SetChild(0, oldNode);                   // 指针1指向原结点
         pFather->SetKeyValue(0, leafSplitKey);                       // 设置键
-        pFather->SetPointer(1, newNode);                // 指针2指向新结点
+        pFather->SetChild(1, newNode);                // 指针2指向新结点
         oldNode->SetFather(pFather);                                // 指定父结点
         newNode->SetFather(pFather);                                // 指定父结点
         pFather->SetCount(1);
@@ -869,7 +789,7 @@ bool BPlusTree<foo>::InsertInterNode(InterNode<foo> *pNode, foo key, Node<foo> *
     //当前中间节点满了，新创建一个
     InterNode<foo>* pBro = new InterNode<foo>;  
     // 分裂当前中间结点(那个节点键少给哪个插)
-    foo newKey = pNode->Split(pBro, key);   
+    foo newKey = pNode->Split(pBro, key, MAX_KEYNUM,ORDER);   
 
     if (pNode->GetCount() < pBro->GetCount())
     {
@@ -881,7 +801,7 @@ bool BPlusTree<foo>::InsertInterNode(InterNode<foo> *pNode, foo key, Node<foo> *
     }
     else    // 两者相等，即键值在第V和V+1个键值中间的情况，把字节点挂到新结点的第一个指针上
     {
-        pBro->SetPointer(0,rightChild);
+        pBro->SetChild(0,rightChild);
         rightChild->SetFather(pBro);
         if (ORDER*2!=MAX_KEYNUM) {
             pBro->SetCount(pBro->GetCount()-1);
@@ -894,9 +814,9 @@ bool BPlusTree<foo>::InsertInterNode(InterNode<foo> *pNode, foo key, Node<foo> *
     if (NULL == pFather)
     {
         pFather = new InterNode<foo>;
-        pFather->SetPointer(0, pNode);                  // 指向原结点
+        pFather->SetChild(0, pNode);                  // 指向原结点
         pFather->SetKeyValue(0, newKey);                   // 设置键
-        pFather->SetPointer(1, pBro);                   // 指向新结点
+        pFather->SetChild(1, pBro);                   // 指向新结点
         pNode->SetFather(pFather);                                 // 指定父结点
         pBro->SetFather(pFather);                                  // 指定父结点
         pFather->SetCount(1);
@@ -921,7 +841,6 @@ bool BPlusTree<foo>::InsertInterNode(InterNode<foo> *pNode, foo key, Node<foo> *
 template<typename foo>
 bool BPlusTree<foo>::Delete(foo key)
 {
-    
     // 查找理想的叶子结点
     LeafNode<foo>* oldNode = SearchLeafNode(key);
     // 如果没有找到，返回失败
@@ -952,94 +871,26 @@ bool BPlusTree<foo>::Delete(foo key)
         return true;
     }
 
-   
     // 情况（1）叶子节点自身能维持
     if (oldNode->GetCount() >= ORDER)
     {
         //更新父亲节点
-        InterNode<foo>* father=(InterNode<foo>*)oldNode->GetFather();
-        while (father!=NULL) {
-            for (int i=0; i<father->GetCount(); i++) {
-                if (father->GetKeyValue(i)==key) {
-                    father->ReplaceKeyValue(i, oldNode->GetKeyValue(0));
-                    break;
-                }
-            }
-            father=(InterNode<foo>*)father->GetFather();
-        }
+        UpdateKey(key, oldNode, 0);
         return true;
     }
 
     // 找到一个最近的兄弟结点
     int leftOrRight=1;  //1代表当前为左兄弟
-    LeafNode<foo>* pBro = (LeafNode<foo>*)(oldNode->GetBro(leftOrRight));
+    LeafNode<foo>* pBro = (LeafNode<foo>*)(oldNode->GetBro(leftOrRight,ORDER));
 
     // 兄弟借出后能维持 对应情况1）
-    foo newkey = NULL;
-    uint64_t newValue=0;
-    if (pBro->GetCount() > ORDER)
-    {
-        if (leftOrRight==1)    // 兄弟在左边，移最后一个数据
-        {
-            newkey = pBro->GetKeyValue(pBro->GetCount()-1);
-            newValue = pBro->GetValues(pBro->GetCount()-1);
-        }
-        else    // 兄弟在右边，移第一个数据过来
-        {
-            newkey = pBro->GetKeyValue(0);
-            newValue = pBro->GetValues(0);
-        }
-
-        oldNode->Insert(newkey,newValue);
-        pBro->Delete(newkey);
-
-        // 修改父结点的键值
-        if (leftOrRight==1)
-        {
-            //更新父亲节点
-            InterNode<foo>* father=(InterNode<foo>*)oldNode->GetFather();
-            while (father!=NULL) {
-                for (int i=0; i<father->GetCount(); i++) {
-                    if (father->GetKeyValue(i)==key) {
-                        father->ReplaceKeyValue(i, oldNode->GetKeyValue(0));
-                        break;
-                    }
-                }
-                father=(InterNode<foo>*)father->GetFather();
-            }
-        }
-        else if(leftOrRight==2)
-        {
-            
-            //原节点更新父亲键值
-            InterNode<foo>* father=(InterNode<foo>*)oldNode->GetFather();
-            while (father!=NULL) {
-                for (int i=0; i<father->GetCount(); i++) {
-                    if (father->GetKeyValue(i)==key) {
-                        father->ReplaceKeyValue(i, oldNode->GetKeyValue(0));
-                        break;
-                    }
-                }
-                father=(InterNode<foo>*)father->GetFather();
-            }
-
-            //兄弟更新父亲键值 
-            father=(InterNode<foo>*)pBro->GetFather();
-            for (int i=0; i<father->GetCount(); i++) {
-                if (father->GetKeyValue(i)==newkey) {
-                    father->ReplaceKeyValue(i, pBro->GetKeyValue(0));
-                    break;
-                }
-            }
-            
-        }
+    if(BorrowLeafBro(oldNode,pBro,key,leftOrRight)==true) {
         return true;
     }
 
     // 情况2)兄弟结点临界维持
-   
     // 父结点中要删除的键
-    foo delKey = NULL;
+    foo delKey = key;
 
     // 把本结点与兄弟结点合并，大的往小的合并，父结点就无需修改指针（因此前面pBro尽量获取的都是右兄弟）
     // 找到的是左兄弟
@@ -1049,16 +900,7 @@ bool BPlusTree<foo>::Delete(foo key)
         delKey = oldNode->GetKeyValue(0);//获取要删除的key,方便父亲杰迪纳中的删除
 
         //更新父亲节点
-        InterNode<foo>* father=(InterNode<foo>*)pBro->GetFather();
-        while (father!=NULL) {
-            for (int i=0; i<father->GetCount(); i++) {
-                if (father->GetKeyValue(i)==key) {
-                    father->ReplaceKeyValue(i, pBro->GetKeyValue(0));
-                    break;
-                }
-            }
-            father=(InterNode<foo>*)father->GetFather();
-        }
+        UpdateKey(key, pBro, 0);
 
         LeafNode<foo>* oldNext = oldNode->GetRightBro();
         pBro->SetRightBro(oldNext);   //原节点的后一个节点设置为要删除节点的下一个节点
@@ -1079,17 +921,8 @@ bool BPlusTree<foo>::Delete(foo key)
         oldNode->Combine(pBro);
         delKey = pBro->GetKeyValue(0);//获取要删除的key，方便父亲杰迪纳中的删除
 
-        //更新父亲节点
-        InterNode<foo>* father=(InterNode<foo>*)oldNode->GetFather();
-        while (father!=NULL) {
-            for (int i=0; i<father->GetCount(); i++) {
-                if (father->GetKeyValue(i)==key) {
-                    father->ReplaceKeyValue(i, oldNode->GetKeyValue(0));
-                    break;
-                }
-            }
-            father=(InterNode<foo>*)father->GetFather();
-        }
+        UpdateKey(key,oldNode, 0);
+
 
         LeafNode<foo>* oldNext = pBro->GetRightBro();
         oldNode->SetRightBro(oldNext);  //原节点的后一个节点设置为要删除节点的下一个节点
@@ -1103,10 +936,8 @@ bool BPlusTree<foo>::Delete(foo key)
          // 删除本结点
         delete pBro;
     }
-
     return DelInterNode(pFather, delKey);
 }
-
 
 //递归删除合并中间节点
 template<typename foo>
@@ -1121,8 +952,8 @@ bool BPlusTree<foo>::DelInterNode(InterNode<foo>* pNode, foo key){
         // 一个数据都没有了，把根结点的第一个结点作为根结点(此时树只剩一个节点)
         if (pNode->GetCount()==0)
         {
-            SetRoot(pNode->GetPointer(0));
-            pNode->GetPointer(0)->SetFather(NULL);
+            SetRoot(pNode->GetChild(0));
+            pNode->GetChild(0)->SetFather(NULL);
             delete pNode;
         }
         return true;
@@ -1144,19 +975,17 @@ bool BPlusTree<foo>::DelInterNode(InterNode<foo>* pNode, foo key){
 
     //找到一个最近的兄弟结点(根据B+树的定义，除了根结点，总是能找到的)
     int leftOrRight = 1;
-    InterNode<foo>* pBro = (InterNode<foo>*)(pNode->GetBro(leftOrRight));
+    InterNode<foo>* pBro = (InterNode<foo>*)(pNode->GetBro(leftOrRight,ORDER));
 
     // 兄弟借出后能维持
-    foo newKey = NULL;
     if (pBro->GetCount() > ORDER)
     {
-        pNode->Borrow(pBro);
+        pNode->BorrowInterBro(pBro);
         return true;
     }
    
     // 兄弟结点维持不了，合并结点，父结点需要删除键
-    foo delKey = NULL;
-
+    foo delKey = key;
     // 把本结点与兄弟结点合并，无论如何合并到数据较小的结点，这样父结点就无需修改指针
     if (leftOrRight == 1)
     {
@@ -1176,14 +1005,64 @@ bool BPlusTree<foo>::DelInterNode(InterNode<foo>* pNode, foo key){
 
 }
 
+template<typename foo>
+bool  BPlusTree<foo>::BorrowLeafBro(LeafNode<foo>* oldNode,LeafNode<foo>* pBro,foo key,int leftOrRight){
+// 兄弟借出后能维持 对应情况1）
+    foo newkey = key;
+    uint64_t newValue=0;
+
+    if (pBro->GetCount() > ORDER)
+    {
+        if (leftOrRight==1)    // 兄弟在左边，移最后一个数据
+        {
+            newkey = pBro->GetKeyValue(pBro->GetCount()-1);
+            newValue = pBro->GetValues(pBro->GetCount()-1);
+        }
+        else    // 兄弟在右边，移第一个数据过来
+        {
+            newkey = pBro->GetKeyValue(0);
+            newValue = pBro->GetValues(0);
+        }
+
+        oldNode->Insert(newkey,newValue);
+        pBro->Delete(newkey);
+
+        // 修改父结点的键值
+        if (leftOrRight==1)
+        {
+            UpdateKey(key, oldNode,0);
+        }
+        else if(leftOrRight==2)
+        {
+            
+            //原节点更新父亲键值
+            UpdateKey(key, oldNode,0);
+
+            //兄弟仅更新当前父亲键值 
+            InterNode<foo>* father=(InterNode<foo>*)pBro->GetFather();
+            for (int i=0; i<father->GetCount(); i++) {
+                if (father->GetKeyValue(i)==newkey) {
+                    father->ReplaceKeyValue(i, pBro->GetKeyValue(0));
+                    break;
+                }
+            }
+            
+        }
+        return true;
+    }
+    return false;
+}
+
 //更新父亲键值
 template<typename foo>
-void BPlusTree<foo>::UpdateKey(foo key,Node<foo>* oldNode) {
+void BPlusTree<foo>::UpdateKey(foo key,Node<foo>* oldNode,int x) {
     InterNode<foo>* father=(InterNode<foo>*)oldNode->GetFather();
     while (father!=NULL) {
         for (int i=0; i<father->GetCount(); i++) {
             if (father->GetKeyValue(i)==key) {
-                father->SetKeyValue(i, father->GetChild(i+1)->GetKeyValue(0));
+                
+                father->ReplaceKeyValue(i, oldNode->GetKeyValue(x));
+                // father->SetKeyValue(i, father->GetChild(i+1)->GetKeyValue(0));
                 break;
             }
         }
@@ -1220,20 +1099,7 @@ void BPlusTree<foo>::RangeQuery(foo minKey,foo maxKey) {
 }
 
 
-//树的打印
-template<typename foo>
-void BPlusTree<foo>::PrintTree(){
 
-    //获取根节点指针  ？？？还在调试   虚函数解决指针问题
-    LeafNode<foo>* pNode=this->m_LeafHead;  //叶子节点（调用叶子节点版本的GetElement）
-    while(pNode){
-        for(int i=0;i<pNode->GetCount();i++){
-            std::cout<<pNode->GetKeyValue(i)<<" ";
-        }
-        pNode=pNode->GetRightBro();
-        std::cout<<std::endl;
-    }
-}
 
 
 //层序遍历树
@@ -1259,7 +1125,7 @@ void BPlusTree<foo>::LevelTraversal(Node<foo>* pNode){
         //非叶子节点才将指针入队
         if(node->GetNodeType()!=2){
             for(int i=0;i<=node->GetCount();i++){
-                q.push(node->GetPointer(i));
+                q.push(node->GetChild(i));
                 n++;
             }
         }

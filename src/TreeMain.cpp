@@ -6,23 +6,26 @@
 int main()
 {
     while(1) {
+
+        //建树
+        BPlusTree<int> x;
+        std::vector<int> temp;//测试用
+        int iKEY,iValue,delKey;
+        int sss;
+        int num=0;
         int pro=0;
+
         std::cout<<"输入0退出，输入1开始"<<std::endl;
         std::cin>>pro;
         if (pro==0) {
             break;
         }
         std::cout<<"输入MAX_KEYNUM"<<std::endl;
-        int sss;
         std::cin>>sss;
-        MAX_POINTERNUM=MAX_KEYNUM=sss-1;
-        ORDER=sss/2;
+        x.SetMaxKey(sss-1);
+        x.SetMinKey(sss/2);
         
-        //建树
-        BPlusTree<int> x;
-        int num=0;
-        std::vector<int> temp;
-        int iKEY,iValue,delKey;
+        
         while(1) {
             int choice;
             std::cout<<"请选择操作：1插入，2范围查询，3删除，4打印，5~100为测试，-1退出"<<std::endl;
@@ -68,8 +71,6 @@ int main()
                 }
                 break;
             case 4:
-                std::cout<<"叶子节点遍历"<<std::endl;
-                x.PrintTree();
                 std::cout<<"层序遍历"<<std::endl;
                 x.LevelTraversal(x.GetRoot());
                 break;
@@ -95,12 +96,6 @@ int main()
 
                 x.Insert(121,77);
                 x.Insert(22,77);
-                //x.Insert(45,77);
-                //x.Insert(56,77);
-
-
-
-                //x.Delete(11); 
                 break;
             case 6:
                 std::cin>>num;
