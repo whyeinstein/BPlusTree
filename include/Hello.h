@@ -1,20 +1,15 @@
 #ifndef HELLO_H
 #define HELLO_H
 
-#include<string>
-#include<iostream>
+#include <iostream>
+#include <string>
 
-class Hello{
-public:
-    void sayHello();
+class Hello {
+ public:
+  void sayHello();
 
-private:
-    std::string s = "hello";
+ private:
+  std::string s = "hello";
 };
-
-
-
-
-
 
 #endif  // HELLO_H
