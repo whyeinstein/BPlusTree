@@ -1,0 +1,193 @@
+==16745== Memcheck, a memory error detector
+==16745== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
+==16745== Using Valgrind-3.18.1 and LibVEX; rerun with -h for copyright info
+==16745== Command: ./build/src/main
+==16745== Parent PID: 9668
+==16745== 
+==16745== 
+==16745== Process terminating with default action of signal 2 (SIGINT)
+==16745==    at 0x4BCB992: read (read.c:26)
+==16745==    by 0x4B43CB5: _IO_file_underflow@@GLIBC_2.2.5 (fileops.c:516)
+==16745==    by 0x4B44E15: _IO_default_uflow (genops.c:362)
+==16745==    by 0x497D8C0: __gnu_cxx::stdio_sync_filebuf<char, std::char_traits<char> >::underflow() (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30)
+==16745==    by 0x498B9B1: std::istream::sentry::sentry(std::istream&, bool) (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30)
+==16745==    by 0x498BC31: std::istream::operator>>(int&) (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30)
+==16745==    by 0x10A4E6: main (TreeMain.cpp:33)
+==16745== 
+==16745== HEAP SUMMARY:
+==16745==     in use at exit: 76,252 bytes in 37 blocks
+==16745==   total heap usage: 115 allocs, 78 frees, 87,064 bytes allocated
+==16745== 
+==16745== 4 bytes in 1 blocks are still reachable in loss record 1 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x113201: __gnu_cxx::new_allocator<int>::allocate(unsigned long, void const*) (new_allocator.h:127)
+==16745==    by 0x1126C8: std::allocator_traits<std::allocator<int> >::allocate(std::allocator<int>&, unsigned long) (alloc_traits.h:464)
+==16745==    by 0x1117DD: std::_Vector_base<int, std::allocator<int> >::_M_allocate(unsigned long) (stl_vector.h:346)
+==16745==    by 0x1106B4: void std::vector<int, std::allocator<int> >::_M_realloc_insert<int const&>(__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, int const&) (vector.tcc:440)
+==16745==    by 0x10DE6F: std::vector<int, std::allocator<int> >::insert(__gnu_cxx::__normal_iterator<int const*, std::vector<int, std::allocator<int> > >, int const&) (vector.tcc:161)
+==16745==    by 0x10C606: Node<int>::SetKeyValue(int, int) (B+tree.h:194)
+==16745==    by 0x10C876: BPlusTree<int>::InsertInterNode(InterNode<int>*, int, Node<int>*) (B+tree.h:836)
+==16745==    by 0x10B427: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:796)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 16 bytes in 1 blocks are still reachable in loss record 2 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x1135CB: __gnu_cxx::new_allocator<Node<int>*>::allocate(unsigned long, void const*) (new_allocator.h:127)
+==16745==    by 0x112AC4: std::allocator_traits<std::allocator<Node<int>*> >::allocate(std::allocator<Node<int>*>&, unsigned long) (alloc_traits.h:464)
+==16745==    by 0x111FA1: std::_Vector_base<Node<int>*, std::allocator<Node<int>*> >::_M_allocate(unsigned long) (stl_vector.h:346)
+==16745==    by 0x110D00: void std::vector<Node<int>*, std::allocator<Node<int>*> >::_M_realloc_insert<Node<int>* const&>(__gnu_cxx::__normal_iterator<Node<int>**, std::vector<Node<int>*, std::allocator<Node<int>*> > >, Node<int>* const&) (vector.tcc:440)
+==16745==    by 0x10E2FF: std::vector<Node<int>*, std::allocator<Node<int>*> >::insert(__gnu_cxx::__normal_iterator<Node<int>* const*, std::vector<Node<int>*, std::allocator<Node<int>*> > >, Node<int>* const&) (vector.tcc:161)
+==16745==    by 0x10C565: InterNode<int>::SetChild(int, Node<int>*) (B+tree.h:206)
+==16745==    by 0x10C896: BPlusTree<int>::InsertInterNode(InterNode<int>*, int, Node<int>*) (B+tree.h:837)
+==16745==    by 0x10B427: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:796)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 16 bytes in 2 blocks are still reachable in loss record 3 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x113201: __gnu_cxx::new_allocator<int>::allocate(unsigned long, void const*) (new_allocator.h:127)
+==16745==    by 0x1126C8: std::allocator_traits<std::allocator<int> >::allocate(std::allocator<int>&, unsigned long) (alloc_traits.h:464)
+==16745==    by 0x1117DD: std::_Vector_base<int, std::allocator<int> >::_M_allocate(unsigned long) (stl_vector.h:346)
+==16745==    by 0x1106B4: void std::vector<int, std::allocator<int> >::_M_realloc_insert<int const&>(__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, int const&) (vector.tcc:440)
+==16745==    by 0x10DE6F: std::vector<int, std::allocator<int> >::insert(__gnu_cxx::__normal_iterator<int const*, std::vector<int, std::allocator<int> > >, int const&) (vector.tcc:161)
+==16745==    by 0x10C292: LeafNode<int>::Insert(int, unsigned long) (B+tree.h:580)
+==16745==    by 0x10C356: LeafNode<int>::Split(LeafNode<int>*) (B+tree.h:599)
+==16745==    by 0x10B2B8: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:767)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 32 bytes in 2 blocks are still reachable in loss record 4 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x1133B9: __gnu_cxx::new_allocator<unsigned long>::allocate(unsigned long, void const*) (new_allocator.h:127)
+==16745==    by 0x112886: std::allocator_traits<std::allocator<unsigned long> >::allocate(std::allocator<unsigned long>&, unsigned long) (alloc_traits.h:464)
+==16745==    by 0x111B2B: std::_Vector_base<unsigned long, std::allocator<unsigned long> >::_M_allocate(unsigned long) (stl_vector.h:346)
+==16745==    by 0x110244: void std::vector<unsigned long, std::allocator<unsigned long> >::_M_realloc_insert<unsigned long const&>(__gnu_cxx::__normal_iterator<unsigned long*, std::vector<unsigned long, std::allocator<unsigned long> > >, unsigned long const&) (vector.tcc:440)
+==16745==    by 0x10DC23: std::vector<unsigned long, std::allocator<unsigned long> >::insert(__gnu_cxx::__normal_iterator<unsigned long const*, std::vector<unsigned long, std::allocator<unsigned long> > >, unsigned long const&) (vector.tcc:161)
+==16745==    by 0x10C237: LeafNode<int>::Insert(int, unsigned long) (B+tree.h:578)
+==16745==    by 0x10C356: LeafNode<int>::Split(LeafNode<int>*) (B+tree.h:599)
+==16745==    by 0x10B2B8: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:767)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 32 bytes in 2 blocks are still reachable in loss record 5 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x113201: __gnu_cxx::new_allocator<int>::allocate(unsigned long, void const*) (new_allocator.h:127)
+==16745==    by 0x1126C8: std::allocator_traits<std::allocator<int> >::allocate(std::allocator<int>&, unsigned long) (alloc_traits.h:464)
+==16745==    by 0x1117DD: std::_Vector_base<int, std::allocator<int> >::_M_allocate(unsigned long) (stl_vector.h:346)
+==16745==    by 0x1106B4: void std::vector<int, std::allocator<int> >::_M_realloc_insert<int const&>(__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, int const&) (vector.tcc:440)
+==16745==    by 0x10DE6F: std::vector<int, std::allocator<int> >::insert(__gnu_cxx::__normal_iterator<int const*, std::vector<int, std::allocator<int> > >, int const&) (vector.tcc:161)
+==16745==    by 0x10C606: Node<int>::SetKeyValue(int, int) (B+tree.h:194)
+==16745==    by 0x10E407: InterNode<int>::Insert(int, Node<int>*) (B+tree.h:220)
+==16745==    by 0x10C6BD: BPlusTree<int>::InsertInterNode(InterNode<int>*, int, Node<int>*) (B+tree.h:804)
+==16745==    by 0x10B427: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:796)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 64 bytes in 2 blocks are still reachable in loss record 6 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x1135CB: __gnu_cxx::new_allocator<Node<int>*>::allocate(unsigned long, void const*) (new_allocator.h:127)
+==16745==    by 0x112AC4: std::allocator_traits<std::allocator<Node<int>*> >::allocate(std::allocator<Node<int>*>&, unsigned long) (alloc_traits.h:464)
+==16745==    by 0x111FA1: std::_Vector_base<Node<int>*, std::allocator<Node<int>*> >::_M_allocate(unsigned long) (stl_vector.h:346)
+==16745==    by 0x110D00: void std::vector<Node<int>*, std::allocator<Node<int>*> >::_M_realloc_insert<Node<int>* const&>(__gnu_cxx::__normal_iterator<Node<int>**, std::vector<Node<int>*, std::allocator<Node<int>*> > >, Node<int>* const&) (vector.tcc:440)
+==16745==    by 0x10E2FF: std::vector<Node<int>*, std::allocator<Node<int>*> >::insert(__gnu_cxx::__normal_iterator<Node<int>* const*, std::vector<Node<int>*, std::allocator<Node<int>*> > >, Node<int>* const&) (vector.tcc:161)
+==16745==    by 0x10C565: InterNode<int>::SetChild(int, Node<int>*) (B+tree.h:206)
+==16745==    by 0x10E428: InterNode<int>::Insert(int, Node<int>*) (B+tree.h:221)
+==16745==    by 0x10C6BD: BPlusTree<int>::InsertInterNode(InterNode<int>*, int, Node<int>*) (B+tree.h:804)
+==16745==    by 0x10B427: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:796)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 72 bytes in 1 blocks are still reachable in loss record 7 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x10B35C: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:785)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 72 bytes in 1 blocks are still reachable in loss record 8 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x10C6CC: BPlusTree<int>::InsertInterNode(InterNode<int>*, int, Node<int>*) (B+tree.h:808)
+==16745==    by 0x10B427: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:796)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 72 bytes in 1 blocks are still reachable in loss record 9 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x10C833: BPlusTree<int>::InsertInterNode(InterNode<int>*, int, Node<int>*) (B+tree.h:834)
+==16745==    by 0x10B427: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:796)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 88 bytes in 1 blocks are still reachable in loss record 10 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x10B217: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:749)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 96 bytes in 6 blocks are still reachable in loss record 11 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x113201: __gnu_cxx::new_allocator<int>::allocate(unsigned long, void const*) (new_allocator.h:127)
+==16745==    by 0x1126C8: std::allocator_traits<std::allocator<int> >::allocate(std::allocator<int>&, unsigned long) (alloc_traits.h:464)
+==16745==    by 0x1117DD: std::_Vector_base<int, std::allocator<int> >::_M_allocate(unsigned long) (stl_vector.h:346)
+==16745==    by 0x1106B4: void std::vector<int, std::allocator<int> >::_M_realloc_insert<int const&>(__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, int const&) (vector.tcc:440)
+==16745==    by 0x10DE6F: std::vector<int, std::allocator<int> >::insert(__gnu_cxx::__normal_iterator<int const*, std::vector<int, std::allocator<int> > >, int const&) (vector.tcc:161)
+==16745==    by 0x10C292: LeafNode<int>::Insert(int, unsigned long) (B+tree.h:580)
+==16745==    by 0x10B266: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:756)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 128 bytes in 1 blocks are still reachable in loss record 12 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x113201: __gnu_cxx::new_allocator<int>::allocate(unsigned long, void const*) (new_allocator.h:127)
+==16745==    by 0x1126C8: std::allocator_traits<std::allocator<int> >::allocate(std::allocator<int>&, unsigned long) (alloc_traits.h:464)
+==16745==    by 0x1117DD: std::_Vector_base<int, std::allocator<int> >::_M_allocate(unsigned long) (stl_vector.h:346)
+==16745==    by 0x10FB16: void std::vector<int, std::allocator<int> >::_M_realloc_insert<int>(__gnu_cxx::__normal_iterator<int*, std::vector<int, std::allocator<int> > >, int&&) (vector.tcc:440)
+==16745==    by 0x10D5E7: int& std::vector<int, std::allocator<int> >::emplace_back<int>(int&&) (vector.tcc:121)
+==16745==    by 0x10BD1D: std::vector<int, std::allocator<int> >::push_back(int&&) (stl_vector.h:1204)
+==16745==    by 0x10AAE4: main (TreeMain.cpp:110)
+==16745== 
+==16745== 192 bytes in 6 blocks are still reachable in loss record 13 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x1133B9: __gnu_cxx::new_allocator<unsigned long>::allocate(unsigned long, void const*) (new_allocator.h:127)
+==16745==    by 0x112886: std::allocator_traits<std::allocator<unsigned long> >::allocate(std::allocator<unsigned long>&, unsigned long) (alloc_traits.h:464)
+==16745==    by 0x111B2B: std::_Vector_base<unsigned long, std::allocator<unsigned long> >::_M_allocate(unsigned long) (stl_vector.h:346)
+==16745==    by 0x110244: void std::vector<unsigned long, std::allocator<unsigned long> >::_M_realloc_insert<unsigned long const&>(__gnu_cxx::__normal_iterator<unsigned long*, std::vector<unsigned long, std::allocator<unsigned long> > >, unsigned long const&) (vector.tcc:440)
+==16745==    by 0x10DC23: std::vector<unsigned long, std::allocator<unsigned long> >::insert(__gnu_cxx::__normal_iterator<unsigned long const*, std::vector<unsigned long, std::allocator<unsigned long> > >, unsigned long const&) (vector.tcc:161)
+==16745==    by 0x10C237: LeafNode<int>::Insert(int, unsigned long) (B+tree.h:578)
+==16745==    by 0x10B266: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:756)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 616 bytes in 7 blocks are still reachable in loss record 14 of 17
+==16745==    at 0x4849013: operator new(unsigned long) (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x10B296: BPlusTree<int>::Insert(int, unsigned long) (B+tree.h:764)
+==16745==    by 0x10AC6B: main (TreeMain.cpp:130)
+==16745== 
+==16745== 1,024 bytes in 1 blocks are still reachable in loss record 15 of 17
+==16745==    at 0x4848899: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x4B35C23: _IO_file_doallocate (filedoalloc.c:101)
+==16745==    by 0x4B44D5F: _IO_doallocbuf (genops.c:347)
+==16745==    by 0x4B43FDF: _IO_file_overflow@@GLIBC_2.2.5 (fileops.c:744)
+==16745==    by 0x4B42754: _IO_new_file_xsputn (fileops.c:1243)
+==16745==    by 0x4B42754: _IO_file_xsputn@@GLIBC_2.2.5 (fileops.c:1196)
+==16745==    by 0x4B37056: fwrite (iofwrite.c:39)
+==16745==    by 0x49A7B64: std::basic_ostream<char, std::char_traits<char> >& std::__ostream_insert<char, std::char_traits<char> >(std::basic_ostream<char, std::char_traits<char> >&, char const*, long) (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30)
+==16745==    by 0x49A7EBA: std::basic_ostream<char, std::char_traits<char> >& std::operator<< <std::char_traits<char> >(std::basic_ostream<char, std::char_traits<char> >&, char const*) (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30)
+==16745==    by 0x10A3EC: main (TreeMain.cpp:18)
+==16745== 
+==16745== 1,024 bytes in 1 blocks are still reachable in loss record 16 of 17
+==16745==    at 0x4848899: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x4B35C23: _IO_file_doallocate (filedoalloc.c:101)
+==16745==    by 0x4B44D5F: _IO_doallocbuf (genops.c:347)
+==16745==    by 0x4B43D5B: _IO_file_underflow@@GLIBC_2.2.5 (fileops.c:485)
+==16745==    by 0x4B44E15: _IO_default_uflow (genops.c:362)
+==16745==    by 0x497D8C0: __gnu_cxx::stdio_sync_filebuf<char, std::char_traits<char> >::underflow() (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30)
+==16745==    by 0x498B9D5: std::istream::sentry::sentry(std::istream&, bool) (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30)
+==16745==    by 0x498BC31: std::istream::operator>>(int&) (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30)
+==16745==    by 0x10A417: main (TreeMain.cpp:19)
+==16745== 
+==16745== 72,704 bytes in 1 blocks are still reachable in loss record 17 of 17
+==16745==    at 0x4848899: malloc (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)
+==16745==    by 0x4915939: ??? (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30)
+==16745==    by 0x400647D: call_init.part.0 (dl-init.c:70)
+==16745==    by 0x4006567: call_init (dl-init.c:33)
+==16745==    by 0x4006567: _dl_init (dl-init.c:117)
+==16745==    by 0x40202E9: ??? (in /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2)
+==16745== 
+==16745== LEAK SUMMARY:
+==16745==    definitely lost: 0 bytes in 0 blocks
+==16745==    indirectly lost: 0 bytes in 0 blocks
+==16745==      possibly lost: 0 bytes in 0 blocks
+==16745==    still reachable: 76,252 bytes in 37 blocks
+==16745==         suppressed: 0 bytes in 0 blocks
+==16745== 
+==16745== For lists of detected and suppressed errors, rerun with: -s
+==16745== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)

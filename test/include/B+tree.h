@@ -37,6 +37,9 @@ class Node {
   //替换键值
   void ReplaceKeyValue(int i, T key);
 
+  //插入
+  bool Insert();
+
   //删除节点时寻找可以借的兄弟
   Node<T>* GetBro(int& leftOrRight, int ORDER);
 
@@ -249,11 +252,11 @@ T InterNode<T>::Split(InterNode<T>* pNode, T key, int MAX_KEYNUM, int ORDER,
         ;
       std::cout << "xxx" << mm - m << std::endl;
       //插入
-      pNode->SetKeyValue(m, this->GetKeyValue(x));
-      pNode->SetChild(m, this->GetChild(x + 1));
+      pNode->SetKeyValue(m, this->GetKeyValue(i));
+      pNode->SetChild(m, this->GetChild(i + 1));
 
       //将插入关键字所在节点的父亲指针设置为当前指针
-      this->GetChild(x + 1)->SetFather(pNode);
+      this->GetChild(i + 1)->SetFather(pNode);
 
       //关键字数目加1
       pNode->SetCount(pNode->GetCount() + 1);
@@ -1092,7 +1095,6 @@ void BPlusTree<foo>::RangeQuery(foo minKey, foo maxKey) {
 //删除整颗树
 template <typename foo>
 void BPlusTree<foo>::DeleteAll() {
-  int i = 0;
   // M，N用于记录当前行和下一行的节点数，实现换行
   int m = 0, n = 0;
   Node<foo>* pNode = this->GetRoot();
@@ -1115,13 +1117,30 @@ void BPlusTree<foo>::DeleteAll() {
       }
     }
     delete node;
-    i++;
     if (m == 0) {
       m = n;
       n = 0;
     }
   }
   this->SetRoot(NULL);
+}
+
+//二分查找
+template <typename T>
+int BinALG(Node<T>* pNode, int size, T target) {
+  int left = 0;
+  int right = size - 1;
+  while (left <= right) {
+    int middle = left + (right - left) / 2;
+    if (target < pNode->GetKeyValue(middle)) {
+      right = middle - 1;
+    } else if (target > pNode->GetKeyValue(middle)) {
+      left = middle + 1;
+    } else {
+      return middle;
+    }
+  }
+  return left;
 }
 
 //层序遍历树
@@ -1164,24 +1183,6 @@ void BPlusTree<foo>::LevelTraversal(Node<foo>* pNode) {
       n = 0;
     }
   }
-}
-
-//二分查找
-template <typename T>
-int BinALG(Node<T>* pNode, int size, T target) {
-  int left = 0;
-  int right = size - 1;
-  while (left <= right) {
-    int middle = left + (right - left) / 2;
-    if (target < pNode->GetKeyValue(middle)) {
-      right = middle - 1;
-    } else if (target > pNode->GetKeyValue(middle)) {
-      left = middle + 1;
-    } else {
-      return middle;
-    }
-  }
-  return left;
 }
 
 #endif  // HELLO_H
