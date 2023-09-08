@@ -682,7 +682,7 @@ LeafNode<foo>* BPlusTree<foo>::SearchLeafNode(foo key) {
       break;
     }
 
-    //寻找大于value的第一个关键字
+    //寻找大于key的第一个关键字
     for (i = 0; (i < pNode->GetCount()) && (key >= pNode->GetKeyValue(i)); i++)
       ;
 
@@ -1132,9 +1132,7 @@ void BPlusTree<foo>::LevelTraversal(Node<foo>* pNode) {
   if (pNode == NULL) {
     return;
   }
-
   int m = 0, n = 0;
-
   Node<foo>* node;
   std::queue<Node<foo>*> q;
   q.push(pNode);
