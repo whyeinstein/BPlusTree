@@ -1,0 +1,93 @@
+@startuml BPlusTree Class Diagram
+class Node {
+  #m_Count:int
+  #nodeType:int
+  #m_Father:Node*             
+  #m_KeyValues:vector<T>  
+  +Node();
+  +~Node(){}  
+  +GetCount():int 
+  +SetCount(int i):void 
+  +GetFather():Node* 
+  +SetFather(Node* father):void 
+  +GetNodeType():int 
+  +SetNodeType(int i):void
+  +GetKeyValue(int i):T
+  +SetKeyValue(int i, T key):void
+  +ReplaceKeyValue(int i, T key):void
+  +GetBro(int& leftOrRight, int ORDER):Node<T>*
+  +SetChild(int i, Node* pointer):void
+  +GetChild(int i):Node<T>*
+  +GetRightBro():Node<T>*
+  +GetLeftBro():Node<T>*
+  +GetValues(int i):T
+}
+
+class InterNode{
+  -m_Childs:<Node<T>*>
+  +InterNode() {}
+  +~InterNode() {}
+  +GetChild(int i):Node<T>* 
+  +Insert(T value, Node<T>* pNode):bool
+  +SetChild(int i, Node<T>* pointer):void
+  +Split(InterNode<T>* parentNode, T key, int MAX_KEYNUM, int ORDER,int& flag):T
+  +Delete(T key):void
+  +Combine(Node<T>* pNode):void
+  +BorrowInterBro(InterNode<T>* pNode):bool
+}
+
+class LeafNode {
+  -m_RightBro:LeafNode<T>*         
+  -m_LeftBro:LeafNode<T>*          
+  -m_Values:vector<uint64_t>  
+  +LeafNode()
+  +~LeafNode()
+  +GetRightBro():LeafNode<T>*
+  +SetRightBro(LeafNode<T>* rightBro):void 
+  +GetLeftBro():LeafNode<T>* 
+  +SetLeftBro(LeafNode<T>* leftBro):void 
+  +GetValues(int i):T 
+  +SetValues(int i, T value):void 
+  +Insert(T key, uint64_t):bool 
+  +Delete(T value):bool 
+  +Combine(Node<T>* pNode):void
+  +Split(LeafNode<T>* pNode):T 
+}
+
+class BPlusTree{
+  -m_LeafHead:LeafNode<foo>*
+  -m_LeafTail:LeafNode<foo>*
+  -m_Root:Node<foo>*         
+  -MAX_KEYNUM:int             
+  -ORDER:int                  
+  +BPlusTree()
+  +~BPlusTree()
+  +Search(foo data, char* sPath):bool 
+  +SearchLeafNode(foo key):LeafNode<foo>*
+  +LeafNode<foo>* SearchDelNode(foo key, int& i)  
+  +Insert(foo key, uint64_t value):bool
+  +InsertInterNode(InterNode<foo>* pNode, foo key, Node<foo>* rightChild):bool
+  +Delete(foo data):bool
+  +DelInterNode(InterNode<foo>* pNode, foo key):bool
+  +UpdateKey(foo key, Node<foo>* oldNode, int x):void
+  +BorrowLeafBro(LeafNode<foo>* oldNode, LeafNode<foo>* pBro, foo key,int leftOrRight):bool
+  +DeleteAll():void
+  +LevelTraversal(Node<foo>* pNode):void
+  +RangeQuery(foo minKey, foo maxKey):void
+  +GetRoot():Node<foo>*
+  +SetRoot(Node<foo>* root):void
+  +SetMaxKey(int i):void
+  +GetMaxKey():int
+  +SetMinKey(int i):void
+  +GetMinKey():int
+}
+
+ LeafNode --* BPlusTree
+ InterNode --* BPlusTree
+ LeafNode--|>Node
+ InterNode--|>Node
+ BPlusTree..>InterNode
+ BPlusTree..>LeafNode
+ BPlusTree..>Node
+
+@enduml
