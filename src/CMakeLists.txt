@@ -19,3 +19,12 @@ add_executable(main TreeMain.cpp)
 target_link_libraries(main PRIVATE bplustree)
 
 target_include_directories(main PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+# 查找Boost库并添加链接
+find_package(Boost REQUIRED COMPONENTS serialization)
+
+
+include_directories(${Boost_INCLUDE_DIRS})
+
+# 链接Boost库
+target_link_libraries(main PRIVATE ${Boost_LIBRARIES})

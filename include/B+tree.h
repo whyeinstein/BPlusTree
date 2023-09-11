@@ -1,9 +1,12 @@
 #ifndef HELLO_H
 #define HELLO_H
 
+#include <boost/serialization/serialization.hpp>
+#include <boost/serialization/vector.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <ostream>
@@ -14,6 +17,17 @@
 /*-------------------------Node类定义---------------------------*/
 template <typename T>
 class Node {
+ private:
+  friend class boost::serialization::access;
+
+  template <class Archive>
+  void serialize(Archive& ar, const unsigned int version) {
+    ar& m_Count;
+    ar& nodeType;
+    ar& m_Father;
+    ar& m_KeyValues;
+  }
+
  public:
   Node();
   virtual ~Node(){};  // virtual ???
@@ -46,7 +60,7 @@ class Node {
   virtual Node<T>* GetLeftBro() { return NULL; }
 
   //虚函数：用于叶子节点获取value
-  virtual T GetValues(int i) { return 0; }
+  virtual uint64_t GetValues(int i) { return 0; }
 
  protected:
   int m_Count;  //有效数据个数（中间节点：键个数，叶子结点：数据个数）
@@ -59,6 +73,15 @@ class Node {
 //内节点
 template <typename T = int>
 class InterNode : public Node<T> {
+ private:
+  friend class boost::serialization::access;
+
+  template <class Archive>
+  void serialize(Archive& ar, const unsigned int version) {
+    ar& boost::serialization::base_object<Node<int>>(*this);
+    ar& m_Childs;
+  }
+
  public:
   InterNode() {}
   ~InterNode() {}
@@ -92,6 +115,17 @@ class InterNode : public Node<T> {
 //叶子节点
 template <typename T = int>
 class LeafNode : public Node<T> {
+ private:
+  friend class boost::serialization::access;
+
+  template <class Archive>
+  void serialize(Archive& ar, const unsigned int version) {
+    ar& boost::serialization::base_object<Node<int>>(*this);
+    ar& m_RightBro;
+    ar& m_LeftBro;
+    ar& m_Values;
+  }
+
  public:
   LeafNode();
   ~LeafNode() {}
@@ -105,7 +139,7 @@ class LeafNode : public Node<T> {
   void SetLeftBro(LeafNode<T>* leftBro) { m_LeftBro = leftBro; }
 
   //获取、设置值
-  T GetValues(int i) { return m_Values[i]; }
+  uint64_t GetValues(int i) { return m_Values[i]; }
   void SetValues(int i, T value) { m_Values[i] = value; }
 
   //叶子节点插入函数
@@ -126,6 +160,18 @@ class LeafNode : public Node<T> {
 /*-----------------------BPlusTree类定义-------------------------*/
 template <typename foo>
 class BPlusTree {
+ private:
+  friend class boost::serialization::access;
+
+  template <class Archive>
+  void serialize(Archive& ar, const unsigned int version) {
+    ar& MAX_KEYNUM;
+    ar& ORDER;
+    ar& m_LeafHead;
+    ar& m_LeafTail;
+    ar& m_Root;
+  }
+
  public:
   BPlusTree();
   ~BPlusTree();
@@ -153,7 +199,7 @@ class BPlusTree {
   void DeleteAll();
 
   //层序遍历
-  void LevelTraversal(Node<foo>* pNode);
+  std::vector<foo> LevelTraversal();
 
   //范围查询
   void RangeQuery(foo minKey, foo maxKey);
@@ -168,13 +214,19 @@ class BPlusTree {
   void SetMinKey(int i) { ORDER = i; }
   int GetMinKey() { return ORDER; }
 
- private:
+ public:
   LeafNode<foo>* m_LeafHead;  //叶子节点链表表头
   LeafNode<foo>* m_LeafTail;  //叶子节点链表表尾
   Node<foo>* m_Root;          //根节点
   int MAX_KEYNUM;             //最大键值数
   int ORDER;                  //最小数目
 };
+
+void SaveTest();
+void Load();
+void thread_entry();
+void Tree(BPlusTree<int>* x);
+void TreeS(BPlusTree<std::string>* sx);
 
 /*-------------------------Node函数定义---------------------------*/
 template <typename T>
@@ -204,7 +256,7 @@ void InterNode<T>::SetChild(int i, Node<T>* pointer) {
 template <typename T>
 bool InterNode<T>::Insert(T key, Node<T>* pNode) {
   //插入
-  int i = 0, j = 0;
+  int i = 0;
   //找到在当前节点应该插入的位置
   i = BinALG(this, this->GetCount(), key);
   for (i = 0; (i < (Node<T>::GetCount())) && (key > Node<T>::GetKeyValue(i));
@@ -234,7 +286,8 @@ template <typename T>
 T InterNode<T>::Split(InterNode<T>* pNode, T key, int MAX_KEYNUM, int ORDER,
                       int& flag)  // key是新插入的值，pNode是分裂结点
 {
-  int i = 0, j = 0, mm = 0;
+  int i = 0;
+  // mm = 0;
 
   // 如果要插入的键值在第V和V+1个键值中间，需要翻转一下，因此先处理此情况
   if ((key > this->GetKeyValue(ORDER - 1)) &&
@@ -243,11 +296,11 @@ T InterNode<T>::Split(InterNode<T>* pNode, T key, int MAX_KEYNUM, int ORDER,
     for (x = ORDER, i = ORDER; i < MAX_KEYNUM; i++) {
       //用m找到在当前节点应该插入的位置,x保存删除位置
       int m = BinALG(pNode, pNode->GetCount(), this->GetKeyValue(i));
-      for (mm = 0; (mm < (pNode->GetCount())) &&
-                   (this->GetKeyValue(i) > pNode->GetKeyValue(mm));
-           mm++)
-        ;
-      std::cout << "xxx" << mm - m << std::endl;
+      // for (mm = 0; (mm < (pNode->GetCount())) &&
+      //              (this->GetKeyValue(i) > pNode->GetKeyValue(mm));
+      //      mm++)
+      //   ;
+      // std::cout << "xxx" << mm - m << std::endl;
       //插入
       pNode->SetKeyValue(m, this->GetKeyValue(x));
       pNode->SetChild(m, this->GetChild(x + 1));
@@ -325,60 +378,6 @@ T InterNode<T>::Split(InterNode<T>* pNode, T key, int MAX_KEYNUM, int ORDER,
     flag = 1;
   }
   return retKey;
-
-  // // 以下处理key小于第V个键值或key大于第V+1个键值的情况
-
-  // // 判断是提取第V还是V+1个键
-  // int position = 0;
-  // if (key < this->GetKeyValue(ORDER - 1))  //？？？位置确定
-  // {
-  //   position = ORDER - 1;
-  // } else {
-  //   position = ORDER;
-  // }
-
-  // // 把第position个键提出来，作为新的键值返回
-  // T retKey = this->GetKeyValue(position);
-
-  // int x;
-  // for (x = position, i = position; i < MAX_KEYNUM; i++) {
-  //   int m = 0;
-  //   // m找到在当前节点应该插入的位置 ,x保存删除位置
-  //   for (m = 0; (m < (pNode->GetCount())) &&
-  //               (this->GetKeyValue(i) > pNode->GetKeyValue(m));
-  //        m++)
-  //     ;
-
-  //   //插入
-  //   pNode->SetKeyValue(m, this->GetKeyValue(i));  //插入键值
-  //   pNode->SetChild(m, this->GetChild(i));  //插入指针(在键值位置下一个)
-  //   this->GetChild(i)->SetFather(
-  //       pNode);  //将插入关键字所在节点的父亲指针设置为当前指针
-
-  //   //关键字数目加1
-  //   pNode->SetCount(pNode->GetCount() + 1);
-
-  //   this->m_KeyValues.erase(this->m_KeyValues.begin() + x);
-  //   // this->m_Childs.erase(this->m_Childs.begin() + x + 1);
-  //   this->m_Childs.erase(this->m_Childs.begin() + x);
-  //   this->SetCount(this->GetCount() - 1);
-  // }
-
-  // //补上新节点中最后的指针并重新设置孩子的指针
-  // pNode->SetChild(MAX_KEYNUM - (position + 1),
-  //                 this->GetChild(this->GetCount()));
-  // this->GetChild(this->GetCount())->SetFather(pNode);
-  // // 把第position+1 -- 2V+1个指针移到指定的结点中(注意指针比键多一个)
-  // j = 0;
-
-  // // 清除提取出的位置
-  // this->m_Childs.erase(this->m_Childs.begin() + this->GetCount());
-  // // this->m_KeyValues.erase(this->m_KeyValues.begin() + position);
-
-  // // 设置好Count个数
-  // this->SetCount(position);
-  // pNode->SetCount(MAX_KEYNUM - (position));
-  // return retKey;
 }
 
 //移动中间节点键值
@@ -386,7 +385,7 @@ template <typename T>
 bool InterNode<T>::BorrowInterBro(
     InterNode<T>* pNode) {  // 定义成InterNode而非Node？？？
   // 参数检查
-  int i, j;
+  // int i;
 
   // 兄弟结点在本结点左边
   if (pNode->GetKeyValue(0) < this->GetKeyValue(0)) {
@@ -499,7 +498,7 @@ void InterNode<T>::Combine(Node<T>* pNode) {
 template <typename T>
 LeafNode<T>::LeafNode() {
   m_RightBro = NULL;
-  LeafNode<T>* m_LeftBro = NULL;
+  m_LeftBro = NULL;
   Node<T>::SetNodeType(2);  //设置节点类型
 }
 
@@ -637,7 +636,6 @@ BPlusTree<foo>::~BPlusTree() {
 template <typename foo>
 bool BPlusTree<foo>::Search(foo data, char* sPath) {
   int i = 0;
-  int offset = 0;
   Node<foo>* pNode = GetRoot();
 
   // 循环查找对应的叶子结点
@@ -1057,7 +1055,7 @@ void BPlusTree<foo>::UpdateKey(foo key, Node<foo>* oldNode, int x) {
 //范围查询
 template <typename foo>
 void BPlusTree<foo>::RangeQuery(foo minKey, foo maxKey) {
-  LeafNode<foo>* pNode = m_LeafHead;
+  // LeafNode<foo>* pNode = m_LeafHead;
   int t = 0;
   // for(int i=0;pNode->GetKeyValue(int i))
   Node<foo>* sNode = GetRoot();
@@ -1126,11 +1124,13 @@ void BPlusTree<foo>::DeleteAll() {
 
 //层序遍历树
 template <typename foo>
-void BPlusTree<foo>::LevelTraversal(Node<foo>* pNode) {
+std::vector<foo> BPlusTree<foo>::LevelTraversal() {
+  Node<foo>* pNode = this->GetRoot();
+  std::vector<foo> testRet;
   std::cout << std::endl;
   // M，N用于记录当前行和下一行的节点数，实现换行
   if (pNode == NULL) {
-    return;
+    return testRet;
   }
   int m = 0, n = 0;
   Node<foo>* node;
@@ -1153,6 +1153,7 @@ void BPlusTree<foo>::LevelTraversal(Node<foo>* pNode) {
     for (int i = 0; i < node->GetCount(); i++) {
       std::cout << "" << node->GetKeyValue(i) << " ";
       std::cout << " ";
+      testRet.push_back(node->GetKeyValue(i));
     }
     std::cout << "]";
 
@@ -1162,6 +1163,7 @@ void BPlusTree<foo>::LevelTraversal(Node<foo>* pNode) {
       n = 0;
     }
   }
+  return testRet;
 }
 
 //二分查找
