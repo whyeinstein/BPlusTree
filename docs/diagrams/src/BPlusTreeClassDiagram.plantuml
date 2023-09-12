@@ -1,5 +1,6 @@
 @startuml BPlusTree Class Diagram
 class Node {
+  -serialize(Archive& ar, const unsigned int version):void
   #m_Count:int
   #nodeType:int
   #m_Father:Node*             
@@ -25,6 +26,7 @@ class Node {
 
 class InterNode{
   -m_Childs:<Node<T>*>
+  -serialize(Archive& ar, const unsigned int version):void
   +InterNode() {}
   +~InterNode() {}
   +GetChild(int i):Node<T>* 
@@ -39,7 +41,8 @@ class InterNode{
 class LeafNode {
   -m_RightBro:LeafNode<T>*         
   -m_LeftBro:LeafNode<T>*          
-  -m_Values:vector<uint64_t>  
+  -m_Values:vector<uint64_t>
+  -serialize(Archive& ar, const unsigned int version):void  
   +LeafNode()
   +~LeafNode()
   +GetRightBro():LeafNode<T>*
@@ -59,7 +62,8 @@ class BPlusTree{
   -m_LeafTail:LeafNode<foo>*
   -m_Root:Node<foo>*         
   -MAX_KEYNUM:int             
-  -ORDER:int                  
+  -ORDER:int 
+  -serialize(Archive& ar, const unsigned int version):void                  
   +BPlusTree()
   +~BPlusTree()
   +Search(foo data, char* sPath):bool 

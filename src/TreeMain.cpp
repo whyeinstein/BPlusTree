@@ -87,9 +87,10 @@ int main() {
           std::cout << "没有这棵树" << std::endl;
         } else {
           x = forest[degree - 1];
+          forest.erase(forest.begin() + degree - 1);
           delete x;
-          forest.erase(forest.begin() + degree);
-          std::cout << "树" << forest.size() << "（int）删除" << std::endl;
+
+          std::cout << "树" << degree << "（int）删除" << std::endl;
         }
         break;
       case 6:
@@ -101,9 +102,10 @@ int main() {
           std::cout << "没有这棵树" << std::endl;
         } else {
           sx = sforest[degree - 1];
+          sforest.erase(sforest.begin() + degree - 1);
           delete sx;
-          sforest.erase(sforest.begin() + degree);
-          std::cout << "树" << forest.size() << "（string）删除" << std::endl;
+
+          std::cout << "树" << degree << "（string）删除" << std::endl;
         }
         break;
       case 7:

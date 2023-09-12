@@ -4,5 +4,4 @@ build
 gprofRecord.txt
 gmon.out
 valReport
-test
-third
+test*.txt

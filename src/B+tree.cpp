@@ -33,7 +33,7 @@ void SaveTest(BPlusTree<int>* saveTree) {
 }
 
 void Load() {  // 打开序列化文件
-  BPlusTree<int>* loadTest;
+  BPlusTree<int>* load;
   std::string openFile;
   std::cout << "请输入文件名" << std::endl;
   std::cin >> openFile;
@@ -50,10 +50,10 @@ void Load() {  // 打开序列化文件
   boost::archive::text_iarchive ia(ifs);
 
   // 反序列化对象
-  ia >> loadTest;
+  ia >> load;
 
-  loadTest->LevelTraversal();
-  forest.push_back(loadTest);
+  load->LevelTraversal();
+  forest.push_back(load);
   std::cout << "反序列化成功" << std::endl;
   std::cout << "树" << forest.size() << "（int）创建" << std::endl;
   // 关闭文件
