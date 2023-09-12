@@ -1,0 +1,2365 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="342" onload="init(evt)" viewBox="0 0 1200 342" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="342.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="325" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="325" > </text>
+<g id="frames">
+<g >
+<title>Unrecognized line: 	           1b7ba std::_Vector_base&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::~_Vector_base+0x42 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (4,428,705,359 samples, 0.49%)</title><rect x="884.8" y="277" width="5.7" height="15.0" fill="rgb(240,211,35)" rx="2" ry="2" />
+<text  x="887.76" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d924 BPlusTree&lt;int&gt;::DeleteAll+0xcc (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (5,176,337,496 samples, 0.57%)</title><rect x="234.6" y="277" width="6.8" height="15.0" fill="rgb(240,94,2)" rx="2" ry="2" />
+<text  x="237.65" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           119ef __gnu_cxx::new_allocator&lt;Node&lt;int&gt;*&gt;::construct&lt;Node&lt;int&gt;*, Node&lt;int&gt;*&gt;+0x39 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (121,132,128 samples, 0.01%)</title><rect x="332.8" y="277" width="0.2" height="15.0" fill="rgb(219,143,12)" rx="2" ry="2" />
+<text  x="335.80" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           26088 std::__copy_move_a&lt;true, __gnu_cxx::__normal_iterator&lt;Node&lt;int&gt;**, std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;, __gnu_cxx::__normal_iterator&lt;Node&lt;int&gt;**, std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt; &gt;+0x53 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (191,377,644 samples, 0.02%)</title><rect x="1107.1" y="277" width="0.2" height="15.0" fill="rgb(209,228,22)" rx="2" ry="2" />
+<text  x="1110.07" y="287.5" ></text>
+</g>
+<g >
+<title>std::ostream::_M_insert&lt;long&gt; (120,250,000 samples, 0.01%)</title><rect x="1116.3" y="213" width="0.2" height="15.0" fill="rgb(206,181,4)" rx="2" ry="2" />
+<text  x="1119.34" y="223.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2032f std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_Temporary_value::_Temporary_value&lt;unsigned long const&amp;&gt;+0x57 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (95,123,404 samples, 0.01%)</title><rect x="1012.3" y="277" width="0.1" height="15.0" fill="rgb(251,195,25)" rx="2" ry="2" />
+<text  x="1015.27" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           180a6 LeafNode&lt;int&gt;::Insert+0xee (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (306,330,799 samples, 0.03%)</title><rect x="755.7" y="277" width="0.4" height="15.0" fill="rgb(253,204,29)" rx="2" ry="2" />
+<text  x="758.73" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2621a std::__relocate_a_1&lt;int, int&gt;+0x31 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (79,845,440 samples, 0.01%)</title><rect x="1108.2" y="277" width="0.1" height="15.0" fill="rgb(227,141,2)" rx="2" ry="2" />
+<text  x="1111.16" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24b94 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::max_size+0x24 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (359,264,483 samples, 0.04%)</title><rect x="1093.7" y="277" width="0.5" height="15.0" fill="rgb(219,204,0)" rx="2" ry="2" />
+<text  x="1096.74" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,360,000,000 samples, 0.26%)</title><rect x="1112.9" y="181" width="3.1" height="15.0" fill="rgb(232,1,44)" rx="2" ry="2" />
+<text  x="1115.92" y="191.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           203e3 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_insert_aux&lt;unsigned long&gt;+0x49 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,733,940,118 samples, 0.19%)</title><rect x="1012.7" y="277" width="2.2" height="15.0" fill="rgb(233,39,2)" rx="2" ry="2" />
+<text  x="1015.69" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25e59 std::__relocate_a&lt;unsigned long*, unsigned long*, std::allocator&lt;unsigned long&gt; &gt;+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (87,042,636 samples, 0.01%)</title><rect x="1102.2" y="277" width="0.1" height="15.0" fill="rgb(222,172,17)" rx="2" ry="2" />
+<text  x="1105.15" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1838d InterNode&lt;int&gt;::SetChild+0x71 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (123,823,222 samples, 0.01%)</title><rect x="786.2" y="277" width="0.2" height="15.0" fill="rgb(250,184,13)" rx="2" ry="2" />
+<text  x="789.24" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,364,500,000 samples, 0.26%)</title><rect x="1112.9" y="197" width="3.1" height="15.0" fill="rgb(207,28,19)" rx="2" ry="2" />
+<text  x="1115.91" y="207.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            f2bd std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::pop_front+0x49 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (127,314,030 samples, 0.01%)</title><rect x="317.2" y="277" width="0.2" height="15.0" fill="rgb(221,39,26)" rx="2" ry="2" />
+<text  x="320.24" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b942 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (237,592,927 samples, 0.03%)</title><rect x="900.9" y="277" width="0.3" height="15.0" fill="rgb(247,108,18)" rx="2" ry="2" />
+<text  x="903.89" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18376 InterNode&lt;int&gt;::SetChild+0x5a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (128,554,337 samples, 0.01%)</title><rect x="786.0" y="277" width="0.2" height="15.0" fill="rgb(239,163,0)" rx="2" ry="2" />
+<text  x="789.03" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bc62 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x108 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (104,747,908 samples, 0.01%)</title><rect x="920.4" y="277" width="0.1" height="15.0" fill="rgb(254,128,4)" rx="2" ry="2" />
+<text  x="923.41" y="287.5" ></text>
+</g>
+<g >
+<title>[unknown] (133,000,000 samples, 0.01%)</title><rect x="1116.3" y="229" width="0.2" height="15.0" fill="rgb(225,61,26)" rx="2" ry="2" />
+<text  x="1119.32" y="239.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e692 Node&lt;int&gt;::GetCount+0x10 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (510,422,023 samples, 0.06%)</title><rect x="308.2" y="277" width="0.6" height="15.0" fill="rgb(243,100,24)" rx="2" ry="2" />
+<text  x="311.15" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ca00 std::allocator_traits&lt;std::allocator&lt;int&gt; &gt;::deallocate+0x31 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (85,992,264 samples, 0.01%)</title><rect x="969.6" y="277" width="0.1" height="15.0" fill="rgb(222,91,7)" rx="2" ry="2" />
+<text  x="972.62" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b7c6 std::_Vector_base&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::~_Vector_base+0x4e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (197,920,180 samples, 0.02%)</title><rect x="890.6" y="277" width="0.2" height="15.0" fill="rgb(233,43,43)" rx="2" ry="2" />
+<text  x="893.56" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1d758 __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::base+0x8 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (111,796,734 samples, 0.01%)</title><rect x="998.3" y="277" width="0.2" height="15.0" fill="rgb(236,76,21)" rx="2" ry="2" />
+<text  x="1001.35" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c226 InterNode&lt;int&gt;::Insert+0x3e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (346,840,227 samples, 0.04%)</title><rect x="945.2" y="277" width="0.4" height="15.0" fill="rgb(247,83,41)" rx="2" ry="2" />
+<text  x="948.19" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           230df std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_check_len+0x43 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (81,650,093 samples, 0.01%)</title><rect x="1076.5" y="277" width="0.1" height="15.0" fill="rgb(217,102,47)" rx="2" ry="2" />
+<text  x="1079.50" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           16484 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::begin+0x36 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (244,036,939 samples, 0.03%)</title><rect x="625.5" y="277" width="0.3" height="15.0" fill="rgb(251,19,17)" rx="2" ry="2" />
+<text  x="628.53" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           230d0 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_check_len+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (239,607,449 samples, 0.03%)</title><rect x="1076.2" y="277" width="0.3" height="15.0" fill="rgb(237,107,52)" rx="2" ry="2" />
+<text  x="1079.17" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20b5e std::_Vector_base&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_deallocate+0x36 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (527,062,780 samples, 0.06%)</title><rect x="1038.8" y="277" width="0.7" height="15.0" fill="rgb(246,171,36)" rx="2" ry="2" />
+<text  x="1041.83" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (176,500,000 samples, 0.02%)</title><rect x="1146.7" y="53" width="0.2" height="15.0" fill="rgb(245,221,20)" rx="2" ry="2" />
+<text  x="1149.69" y="63.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e76 BPlusTree&lt;int&gt;::SearchLeafNode+0x3e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (168,404,318 samples, 0.02%)</title><rect x="687.3" y="277" width="0.2" height="15.0" fill="rgb(251,33,53)" rx="2" ry="2" />
+<text  x="690.30" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ca32 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::erase+0x30 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (78,462,614 samples, 0.01%)</title><rect x="969.7" y="277" width="0.1" height="15.0" fill="rgb(247,111,50)" rx="2" ry="2" />
+<text  x="972.75" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b9b8 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0xaa (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (264,352,100 samples, 0.03%)</title><rect x="902.1" y="277" width="0.4" height="15.0" fill="rgb(206,73,4)" rx="2" ry="2" />
+<text  x="905.15" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2601a std::__relocate_a&lt;Node&lt;int&gt;**, Node&lt;int&gt;**, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;+0x5e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (373,464,270 samples, 0.04%)</title><rect x="1106.4" y="277" width="0.5" height="15.0" fill="rgb(232,116,47)" rx="2" ry="2" />
+<text  x="1109.44" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           206fe std::vector&lt;int, std::allocator&lt;int&gt; &gt;::cbegin+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (192,398,701 samples, 0.02%)</title><rect x="1026.1" y="277" width="0.3" height="15.0" fill="rgb(220,96,20)" rx="2" ry="2" />
+<text  x="1029.15" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           207b3 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_Temporary_value::_Temporary_value&lt;int const&amp;&gt;+0x57 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (136,045,915 samples, 0.01%)</title><rect x="1027.1" y="277" width="0.2" height="15.0" fill="rgb(254,107,51)" rx="2" ry="2" />
+<text  x="1030.09" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e695 Node&lt;int&gt;::GetCount+0x13 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (547,642,802 samples, 0.06%)</title><rect x="308.8" y="277" width="0.7" height="15.0" fill="rgb(233,197,36)" rx="2" ry="2" />
+<text  x="311.82" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25d7e std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_S_max_size+0x50 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (157,222,142 samples, 0.02%)</title><rect x="1101.4" y="277" width="0.2" height="15.0" fill="rgb(219,136,46)" rx="2" ry="2" />
+<text  x="1104.38" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17eba BPlusTree&lt;int&gt;::SearchLeafNode+0x82 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (484,146,916 samples, 0.05%)</title><rect x="716.9" y="277" width="0.6" height="15.0" fill="rgb(243,34,23)" rx="2" ry="2" />
+<text  x="719.86" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1655b std::random_shuffle&lt;__gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt; &gt;+0x71 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (78,845,015 samples, 0.01%)</title><rect x="626.5" y="277" width="0.1" height="15.0" fill="rgb(237,228,0)" rx="2" ry="2" />
+<text  x="629.47" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20ee4 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_realloc_insert&lt;Node&lt;int&gt;* const&amp;&gt;+0x40 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (736,811,471 samples, 0.08%)</title><rect x="1042.5" y="277" width="0.9" height="15.0" fill="rgb(231,45,17)" rx="2" ry="2" />
+<text  x="1045.45" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15e06 std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::_Vector_impl::_Vector_impl+0x28 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (100,884,098 samples, 0.01%)</title><rect x="612.7" y="277" width="0.1" height="15.0" fill="rgb(224,16,11)" rx="2" ry="2" />
+<text  x="615.71" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (177,500,000 samples, 0.02%)</title><rect x="1146.7" y="181" width="0.2" height="15.0" fill="rgb(252,94,44)" rx="2" ry="2" />
+<text  x="1149.68" y="191.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18191 LeafNode&lt;int&gt;::Split+0x77 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (10,233,416,243 samples, 1.13%)</title><rect x="770.8" y="277" width="13.3" height="15.0" fill="rgb(227,175,53)" rx="2" ry="2" />
+<text  x="773.77" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           23432 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::size+0x14 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (108,225,822 samples, 0.01%)</title><rect x="1081.4" y="277" width="0.2" height="15.0" fill="rgb(211,188,48)" rx="2" ry="2" />
+<text  x="1084.42" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,768,000,000 samples, 3.17%)</title><rect x="1149.0" y="165" width="37.5" height="15.0" fill="rgb(243,118,9)" rx="2" ry="2" />
+<text  x="1152.05" y="175.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           17fed LeafNode&lt;int&gt;::Insert+0x35 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (117,019,505 samples, 0.01%)</title><rect x="732.4" y="277" width="0.2" height="15.0" fill="rgb(236,154,9)" rx="2" ry="2" />
+<text  x="735.40" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e70 BPlusTree&lt;int&gt;::SearchLeafNode+0x38 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (19,406,992,549 samples, 2.14%)</title><rect x="661.9" y="277" width="25.2" height="15.0" fill="rgb(241,16,30)" rx="2" ry="2" />
+<text  x="664.90" y="287.5" >U..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,357,250,000 samples, 0.26%)</title><rect x="1112.9" y="149" width="3.1" height="15.0" fill="rgb(217,165,33)" rx="2" ry="2" />
+<text  x="1115.92" y="159.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15224 std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::_Vector_impl::~_Vector_impl+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (180,665,155 samples, 0.02%)</title><rect x="471.9" y="277" width="0.2" height="15.0" fill="rgb(242,219,1)" rx="2" ry="2" />
+<text  x="474.88" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18772 Node&lt;int&gt;::~Node+0x1e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (206,082,842 samples, 0.02%)</title><rect x="823.2" y="277" width="0.3" height="15.0" fill="rgb(206,107,31)" rx="2" ry="2" />
+<text  x="826.24" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18088 LeafNode&lt;int&gt;::Insert+0xd0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (13,035,455,308 samples, 1.44%)</title><rect x="738.7" y="277" width="16.9" height="15.0" fill="rgb(224,173,42)" rx="2" ry="2" />
+<text  x="741.67" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b6ac std::vector&lt;int, std::allocator&lt;int&gt; &gt;::operator[]+0x22 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (350,247,519 samples, 0.04%)</title><rect x="882.9" y="277" width="0.5" height="15.0" fill="rgb(241,170,18)" rx="2" ry="2" />
+<text  x="885.91" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17ea4 BPlusTree&lt;int&gt;::SearchLeafNode+0x6c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (231,531,286 samples, 0.03%)</title><rect x="689.7" y="277" width="0.3" height="15.0" fill="rgb(212,111,51)" rx="2" ry="2" />
+<text  x="692.71" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17ec2 BPlusTree&lt;int&gt;::SearchLeafNode+0x8a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (129,111,301 samples, 0.01%)</title><rect x="717.7" y="277" width="0.1" height="15.0" fill="rgb(214,15,1)" rx="2" ry="2" />
+<text  x="720.66" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ba31 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x123 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (203,117,328 samples, 0.02%)</title><rect x="903.0" y="277" width="0.2" height="15.0" fill="rgb(217,192,3)" rx="2" ry="2" />
+<text  x="905.98" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24c7b std::move&lt;__gnu_cxx::__normal_iterator&lt;Node&lt;int&gt;**, std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;, __gnu_cxx::__normal_iterator&lt;Node&lt;int&gt;**, std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt; &gt;+0x49 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (360,186,396 samples, 0.04%)</title><rect x="1095.4" y="277" width="0.4" height="15.0" fill="rgb(244,35,24)" rx="2" ry="2" />
+<text  x="1098.37" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            cdf9 std::min&lt;unsigned long&gt;+0x17 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (175,227,100 samples, 0.02%)</title><rect x="190.0" y="277" width="0.2" height="15.0" fill="rgb(252,113,9)" rx="2" ry="2" />
+<text  x="193.00" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,733,750,000 samples, 3.17%)</title><rect x="1149.1" y="117" width="37.4" height="15.0" fill="rgb(205,6,44)" rx="2" ry="2" />
+<text  x="1152.09" y="127.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           18075 LeafNode&lt;int&gt;::Insert+0xbd (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (193,222,572 samples, 0.02%)</title><rect x="738.3" y="277" width="0.3" height="15.0" fill="rgb(226,137,15)" rx="2" ry="2" />
+<text  x="741.35" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17dcd Node&lt;int&gt;::GetKeyValue+0x5 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (384,908,442 samples, 0.04%)</title><rect x="630.3" y="277" width="0.5" height="15.0" fill="rgb(248,66,35)" rx="2" ry="2" />
+<text  x="633.30" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            ca50 main+0x927 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (31,589,261,711 samples, 3.48%)</title><rect x="148.3" y="277" width="41.0" height="15.0" fill="rgb(250,188,46)" rx="2" ry="2" />
+<text  x="151.27" y="287.5" >Unr..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,746,250,000 samples, 3.17%)</title><rect x="1149.1" y="133" width="37.4" height="15.0" fill="rgb(245,26,35)" rx="2" ry="2" />
+<text  x="1152.08" y="143.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ba9b std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x18d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (228,542,858 samples, 0.03%)</title><rect x="907.2" y="277" width="0.3" height="15.0" fill="rgb(228,88,4)" rx="2" ry="2" />
+<text  x="910.19" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20959 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0x95 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (566,818,301 samples, 0.06%)</title><rect x="1032.7" y="277" width="0.8" height="15.0" fill="rgb(250,138,10)" rx="2" ry="2" />
+<text  x="1035.73" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           21010 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_realloc_insert&lt;Node&lt;int&gt;* const&amp;&gt;+0x16c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (155,272,611 samples, 0.02%)</title><rect x="1045.4" y="277" width="0.2" height="15.0" fill="rgb(206,4,20)" rx="2" ry="2" />
+<text  x="1048.45" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20122 __gnu_cxx::__normal_iterator&lt;unsigned long*, std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt; &gt;::__normal_iterator+0x1e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (186,899,991 samples, 0.02%)</title><rect x="1009.4" y="277" width="0.3" height="15.0" fill="rgb(247,216,41)" rx="2" ry="2" />
+<text  x="1012.42" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           21364 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::operator[]+0x14 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (226,305,356 samples, 0.02%)</title><rect x="1048.6" y="277" width="0.3" height="15.0" fill="rgb(240,91,5)" rx="2" ry="2" />
+<text  x="1051.63" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           165c3 std::random_shuffle&lt;__gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt; &gt;+0xd9 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (78,918,306 samples, 0.01%)</title><rect x="630.1" y="277" width="0.1" height="15.0" fill="rgb(226,19,19)" rx="2" ry="2" />
+<text  x="633.08" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1d72a std::vector&lt;int, std::allocator&lt;int&gt; &gt;::back+0x40 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (144,446,847 samples, 0.02%)</title><rect x="997.8" y="277" width="0.2" height="15.0" fill="rgb(227,202,6)" rx="2" ry="2" />
+<text  x="1000.81" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (182,000,000 samples, 0.02%)</title><rect x="1146.7" y="197" width="0.2" height="15.0" fill="rgb(245,214,47)" rx="2" ry="2" />
+<text  x="1149.68" y="207.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,755,750,000 samples, 3.17%)</title><rect x="1149.1" y="149" width="37.4" height="15.0" fill="rgb(246,146,19)" rx="2" ry="2" />
+<text  x="1152.07" y="159.5" >[[k..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,351,000,000 samples, 0.26%)</title><rect x="1112.9" y="101" width="3.1" height="15.0" fill="rgb(214,90,46)" rx="2" ry="2" />
+<text  x="1115.93" y="111.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20faf std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_realloc_insert&lt;Node&lt;int&gt;* const&amp;&gt;+0x10b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (473,548,897 samples, 0.05%)</title><rect x="1044.4" y="277" width="0.6" height="15.0" fill="rgb(247,43,49)" rx="2" ry="2" />
+<text  x="1047.36" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bca7 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x14d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,092,391,640 samples, 0.12%)</title><rect x="921.1" y="277" width="1.4" height="15.0" fill="rgb(222,32,25)" rx="2" ry="2" />
+<text  x="924.08" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,354,250,000 samples, 0.26%)</title><rect x="1112.9" y="117" width="3.1" height="15.0" fill="rgb(231,46,42)" rx="2" ry="2" />
+<text  x="1115.92" y="127.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20a30 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0x16c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (497,906,661 samples, 0.05%)</title><rect x="1037.3" y="277" width="0.6" height="15.0" fill="rgb(238,167,41)" rx="2" ry="2" />
+<text  x="1040.30" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17df3 Node&lt;int&gt;::GetKeyValue+0x2b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,664,987,420 samples, 0.18%)</title><rect x="631.8" y="277" width="2.2" height="15.0" fill="rgb(253,201,1)" rx="2" ry="2" />
+<text  x="634.83" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bb8e std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (338,285,393 samples, 0.04%)</title><rect x="918.0" y="277" width="0.4" height="15.0" fill="rgb(218,118,30)" rx="2" ry="2" />
+<text  x="920.96" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           26fe2 std::__copy_move_backward_a2&lt;true, unsigned long*, unsigned long*&gt;+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (211,299,593 samples, 0.02%)</title><rect x="1108.6" y="277" width="0.3" height="15.0" fill="rgb(238,135,22)" rx="2" ry="2" />
+<text  x="1111.59" y="287.5" ></text>
+</g>
+<g >
+<title>[unknown] (80,000,000 samples, 0.01%)</title><rect x="1112.2" y="213" width="0.1" height="15.0" fill="rgb(227,207,48)" rx="2" ry="2" />
+<text  x="1115.19" y="223.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20599 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_realloc_insert&lt;unsigned long const&amp;&gt;+0x145 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (535,660,490 samples, 0.06%)</title><rect x="1022.8" y="277" width="0.7" height="15.0" fill="rgb(220,18,34)" rx="2" ry="2" />
+<text  x="1025.76" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           21527 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_S_relocate+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,073,528,371 samples, 0.23%)</title><rect x="1054.2" y="277" width="2.7" height="15.0" fill="rgb(223,135,49)" rx="2" ry="2" />
+<text  x="1057.25" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,364,750,000 samples, 0.26%)</title><rect x="1112.9" y="213" width="3.1" height="15.0" fill="rgb(236,148,45)" rx="2" ry="2" />
+<text  x="1115.91" y="223.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           13b43 Tree+0x7bf (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (186,820,614 samples, 0.02%)</title><rect x="353.2" y="277" width="0.2" height="15.0" fill="rgb(215,210,47)" rx="2" ry="2" />
+<text  x="356.16" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25e9e std::__niter_base&lt;int*&gt;+0x10 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (82,932,748 samples, 0.01%)</title><rect x="1104.9" y="277" width="0.1" height="15.0" fill="rgb(212,133,10)" rx="2" ry="2" />
+<text  x="1107.92" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b8c6 __gnu_cxx::__normal_iterator&lt;unsigned long*, std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt; &gt;::operator++0x4c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (147,973,086 samples, 0.02%)</title><rect x="900.1" y="277" width="0.2" height="15.0" fill="rgb(252,70,44)" rx="2" ry="2" />
+<text  x="903.15" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18170 LeafNode&lt;int&gt;::Split+0x56 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (87,933,337 samples, 0.01%)</title><rect x="770.6" y="277" width="0.1" height="15.0" fill="rgb(208,116,43)" rx="2" ry="2" />
+<text  x="773.55" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e64a std::queue&lt;Node&lt;int&gt;*, std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;::front+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (878,458,227 samples, 0.10%)</title><rect x="273.0" y="277" width="1.2" height="15.0" fill="rgb(244,42,45)" rx="2" ry="2" />
+<text  x="276.01" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22d40 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_check_len+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (582,636,889 samples, 0.06%)</title><rect x="1067.4" y="277" width="0.7" height="15.0" fill="rgb(217,7,32)" rx="2" ry="2" />
+<text  x="1070.37" y="287.5" ></text>
+</g>
+<g >
+<title>_int_malloc (89,250,000 samples, 0.01%)</title><rect x="1112.7" y="229" width="0.1" height="15.0" fill="rgb(217,31,51)" rx="2" ry="2" />
+<text  x="1115.72" y="239.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fe81 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::emplace_back&lt;Node&lt;int&gt;*&gt;+0x53 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (765,810,524 samples, 0.08%)</title><rect x="324.7" y="277" width="1.0" height="15.0" fill="rgb(247,177,25)" rx="2" ry="2" />
+<text  x="327.71" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20702 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::cbegin+0x36 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (89,782,501 samples, 0.01%)</title><rect x="1026.4" y="277" width="0.1" height="15.0" fill="rgb(235,211,7)" rx="2" ry="2" />
+<text  x="1029.40" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           181a1 LeafNode&lt;int&gt;::Split+0x87 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (160,210,375 samples, 0.02%)</title><rect x="784.1" y="277" width="0.2" height="15.0" fill="rgb(205,227,35)" rx="2" ry="2" />
+<text  x="787.08" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24b55 std::__copy_move_backward_a&lt;true, Node&lt;int&gt;**, Node&lt;int&gt;**&gt;+0x53 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (106,729,971 samples, 0.01%)</title><rect x="1093.5" y="277" width="0.1" height="15.0" fill="rgb(229,6,12)" rx="2" ry="2" />
+<text  x="1096.50" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c258 InterNode&lt;int&gt;::Insert+0x70 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (133,935,067 samples, 0.01%)</title><rect x="945.8" y="277" width="0.1" height="15.0" fill="rgb(227,131,42)" rx="2" ry="2" />
+<text  x="948.76" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24dbe std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_S_max_size+0x3d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (161,217,607 samples, 0.02%)</title><rect x="1096.6" y="277" width="0.2" height="15.0" fill="rgb(240,115,21)" rx="2" ry="2" />
+<text  x="1099.62" y="287.5" ></text>
+</g>
+<g >
+<title>_int_free (165,250,000 samples, 0.02%)</title><rect x="1116.0" y="245" width="0.2" height="15.0" fill="rgb(243,40,38)" rx="2" ry="2" />
+<text  x="1119.02" y="255.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1876f Node&lt;int&gt;::~Node+0x1b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (90,188,869 samples, 0.01%)</title><rect x="823.1" y="277" width="0.1" height="15.0" fill="rgb(238,138,44)" rx="2" ry="2" />
+<text  x="826.12" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c157 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::insert+0x18d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (99,500,165 samples, 0.01%)</title><rect x="941.0" y="277" width="0.1" height="15.0" fill="rgb(225,215,40)" rx="2" ry="2" />
+<text  x="944.02" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24ac2 std::__copy_move_backward_a&lt;true, int*, int*&gt;+0x53 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (326,766,568 samples, 0.04%)</title><rect x="1093.0" y="277" width="0.4" height="15.0" fill="rgb(229,39,11)" rx="2" ry="2" />
+<text  x="1095.98" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1d715 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::back+0x2b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (98,056,927 samples, 0.01%)</title><rect x="997.7" y="277" width="0.1" height="15.0" fill="rgb(234,29,14)" rx="2" ry="2" />
+<text  x="1000.66" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (689,500,000 samples, 0.08%)</title><rect x="1187.8" y="229" width="0.9" height="15.0" fill="rgb(210,82,23)" rx="2" ry="2" />
+<text  x="1190.78" y="239.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1930c __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::__normal_iterator+0x1e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (320,214,388 samples, 0.04%)</title><rect x="875.4" y="277" width="0.4" height="15.0" fill="rgb(227,75,24)" rx="2" ry="2" />
+<text  x="878.36" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bd10 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x1b6 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (7,746,578,381 samples, 0.85%)</title><rect x="924.3" y="277" width="10.0" height="15.0" fill="rgb(226,92,14)" rx="2" ry="2" />
+<text  x="927.26" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22ea9 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_S_relocate+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,192,242,814 samples, 0.24%)</title><rect x="1070.4" y="277" width="2.8" height="15.0" fill="rgb(232,76,8)" rx="2" ry="2" />
+<text  x="1073.37" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c689 InterNode&lt;int&gt;::Split+0x3ab (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (982,809,440 samples, 0.11%)</title><rect x="955.0" y="277" width="1.3" height="15.0" fill="rgb(239,84,49)" rx="2" ry="2" />
+<text  x="958.05" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20855 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_insert_aux&lt;int&gt;+0x49 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (139,756,825 samples, 0.02%)</title><rect x="1027.7" y="277" width="0.1" height="15.0" fill="rgb(247,88,19)" rx="2" ry="2" />
+<text  x="1030.65" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b95d std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x4f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (78,442,655 samples, 0.01%)</title><rect x="901.6" y="277" width="0.1" height="15.0" fill="rgb(234,27,32)" rx="2" ry="2" />
+<text  x="904.62" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bffe std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::insert+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (79,882,411 samples, 0.01%)</title><rect x="939.2" y="277" width="0.1" height="15.0" fill="rgb(214,4,41)" rx="2" ry="2" />
+<text  x="942.15" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           119b3 std::allocator_traits&lt;std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::allocate+0x2c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (117,089,387 samples, 0.01%)</title><rect x="332.2" y="277" width="0.1" height="15.0" fill="rgb(232,51,44)" rx="2" ry="2" />
+<text  x="335.19" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           21372 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::operator[]+0x22 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (114,672,691 samples, 0.01%)</title><rect x="1050.2" y="277" width="0.1" height="15.0" fill="rgb(237,22,35)" rx="2" ry="2" />
+<text  x="1053.15" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           16426 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::push_back+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,560,645,757 samples, 0.17%)</title><rect x="621.7" y="277" width="2.1" height="15.0" fill="rgb(231,99,2)" rx="2" ry="2" />
+<text  x="624.73" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18016 LeafNode&lt;int&gt;::Insert+0x5e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (3,356,575,678 samples, 0.37%)</title><rect x="732.8" y="277" width="4.4" height="15.0" fill="rgb(245,27,54)" rx="2" ry="2" />
+<text  x="735.79" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           19456 std::iter_swap&lt;__gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;, __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt; &gt;+0x3b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,150,109,295 samples, 0.24%)</title><rect x="878.0" y="277" width="2.8" height="15.0" fill="rgb(212,107,50)" rx="2" ry="2" />
+<text  x="880.99" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b999 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x8b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (91,421,105 samples, 0.01%)</title><rect x="902.0" y="277" width="0.1" height="15.0" fill="rgb(231,57,52)" rx="2" ry="2" />
+<text  x="905.00" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           209cf std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0x10b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (762,686,230 samples, 0.08%)</title><rect x="1034.7" y="277" width="1.0" height="15.0" fill="rgb(206,186,46)" rx="2" ry="2" />
+<text  x="1037.67" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b982 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x74 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (85,088,524 samples, 0.01%)</title><rect x="901.8" y="277" width="0.2" height="15.0" fill="rgb(249,131,6)" rx="2" ry="2" />
+<text  x="904.85" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15c06 BPlusTree&lt;int&gt;::Insert+0xe0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (11,069,770,395 samples, 1.22%)</title><rect x="579.6" y="277" width="14.4" height="15.0" fill="rgb(244,193,51)" rx="2" ry="2" />
+<text  x="582.57" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17f2e std::_Vector_base&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_Vector_base+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (119,178,745 samples, 0.01%)</title><rect x="731.1" y="277" width="0.1" height="15.0" fill="rgb(222,101,35)" rx="2" ry="2" />
+<text  x="734.06" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c4cc InterNode&lt;int&gt;::Split+0x1ee (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (167,128,652 samples, 0.02%)</title><rect x="954.4" y="277" width="0.2" height="15.0" fill="rgb(232,4,4)" rx="2" ry="2" />
+<text  x="957.42" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e87 BPlusTree&lt;int&gt;::SearchLeafNode+0x4f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (170,339,990 samples, 0.02%)</title><rect x="688.0" y="277" width="0.2" height="15.0" fill="rgb(234,113,22)" rx="2" ry="2" />
+<text  x="690.96" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           192ee __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::__normal_iterator+0x0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (81,927,397 samples, 0.01%)</title><rect x="873.9" y="277" width="0.1" height="15.0" fill="rgb(228,125,20)" rx="2" ry="2" />
+<text  x="876.92" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           16567 std::random_shuffle&lt;__gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt; &gt;+0x7d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (156,712,133 samples, 0.02%)</title><rect x="626.6" y="277" width="0.2" height="15.0" fill="rgb(230,103,9)" rx="2" ry="2" />
+<text  x="629.58" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c2a2 InterNode&lt;int&gt;::Insert+0xba (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,767,320,307 samples, 0.30%)</title><rect x="949.6" y="277" width="3.6" height="15.0" fill="rgb(238,130,34)" rx="2" ry="2" />
+<text  x="952.64" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fe85 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::emplace_back&lt;Node&lt;int&gt;*&gt;+0x57 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (78,398,384 samples, 0.01%)</title><rect x="325.7" y="277" width="0.1" height="15.0" fill="rgb(228,65,39)" rx="2" ry="2" />
+<text  x="328.71" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25f28 std::__copy_move_backward_a1&lt;true, Node&lt;int&gt;**, Node&lt;int&gt;**&gt;+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (86,523,128 samples, 0.01%)</title><rect x="1105.6" y="277" width="0.1" height="15.0" fill="rgb(245,10,49)" rx="2" ry="2" />
+<text  x="1108.63" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e67f Node&lt;int&gt;::GetNodeType+0x13 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (24,204,632,251 samples, 2.67%)</title><rect x="275.9" y="277" width="31.5" height="15.0" fill="rgb(249,71,53)" rx="2" ry="2" />
+<text  x="278.94" y="287.5" >Un..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e98 BPlusTree&lt;int&gt;::SearchLeafNode+0x60 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (298,398,710 samples, 0.03%)</title><rect x="689.2" y="277" width="0.4" height="15.0" fill="rgb(239,192,9)" rx="2" ry="2" />
+<text  x="692.25" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           210d9 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::erase+0x7b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (787,053,063 samples, 0.09%)</title><rect x="1046.2" y="277" width="1.0" height="15.0" fill="rgb(252,86,28)" rx="2" ry="2" />
+<text  x="1049.17" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1d760 __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::base+0x10 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (87,981,897 samples, 0.01%)</title><rect x="998.5" y="277" width="0.2" height="15.0" fill="rgb(248,158,10)" rx="2" ry="2" />
+<text  x="1001.54" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bc40 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0xe6 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (83,850,290 samples, 0.01%)</title><rect x="920.1" y="277" width="0.1" height="15.0" fill="rgb(240,27,36)" rx="2" ry="2" />
+<text  x="923.11" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15e42 std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::~_Vector_base+0x18 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (107,759,692 samples, 0.01%)</title><rect x="613.1" y="277" width="0.1" height="15.0" fill="rgb(248,69,10)" rx="2" ry="2" />
+<text  x="616.11" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2307f std::move_backward&lt;Node&lt;int&gt;**, Node&lt;int&gt;**&gt;+0x49 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (164,113,642 samples, 0.02%)</title><rect x="1075.9" y="277" width="0.2" height="15.0" fill="rgb(225,202,7)" rx="2" ry="2" />
+<text  x="1078.92" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fc28 std::_Deque_iterator&lt;Node&lt;int&gt;*, Node&lt;int&gt;*&amp;, Node&lt;int&gt;**&gt;::_Deque_iterator+0x3e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (106,830,054 samples, 0.01%)</title><rect x="322.9" y="277" width="0.1" height="15.0" fill="rgb(251,21,25)" rx="2" ry="2" />
+<text  x="325.90" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           182fa InterNode&lt;int&gt;::InterNode+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (129,488,852 samples, 0.01%)</title><rect x="785.6" y="277" width="0.2" height="15.0" fill="rgb(241,127,25)" rx="2" ry="2" />
+<text  x="788.61" y="287.5" ></text>
+</g>
+<g >
+<title>_int_malloc (221,750,000 samples, 0.02%)</title><rect x="1112.3" y="213" width="0.3" height="15.0" fill="rgb(205,79,11)" rx="2" ry="2" />
+<text  x="1115.29" y="223.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (686,000,000 samples, 0.08%)</title><rect x="1187.8" y="165" width="0.9" height="15.0" fill="rgb(224,212,22)" rx="2" ry="2" />
+<text  x="1190.78" y="175.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20cdc std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::cbegin+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (82,300,734 samples, 0.01%)</title><rect x="1041.3" y="277" width="0.1" height="15.0" fill="rgb(241,203,11)" rx="2" ry="2" />
+<text  x="1044.32" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22ca4 std::allocator_traits&lt;std::allocator&lt;unsigned long&gt; &gt;::construct&lt;unsigned long, unsigned long&gt;+0x3a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,693,059,446 samples, 0.19%)</title><rect x="1064.5" y="277" width="2.2" height="15.0" fill="rgb(248,156,12)" rx="2" ry="2" />
+<text  x="1067.51" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (683,500,000 samples, 0.08%)</title><rect x="1187.8" y="85" width="0.9" height="15.0" fill="rgb(244,122,46)" rx="2" ry="2" />
+<text  x="1190.79" y="95.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17df6 Node&lt;int&gt;::GetKeyValue+0x2e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (118,694,457 samples, 0.01%)</title><rect x="660.9" y="277" width="0.2" height="15.0" fill="rgb(215,125,18)" rx="2" ry="2" />
+<text  x="663.92" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           180b9 LeafNode&lt;int&gt;::Insert+0x101 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (293,053,581 samples, 0.03%)</title><rect x="756.2" y="277" width="0.4" height="15.0" fill="rgb(250,141,18)" rx="2" ry="2" />
+<text  x="759.17" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           138c3 Tree+0x53f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (9,377,489,754 samples, 1.03%)</title><rect x="333.9" y="277" width="12.2" height="15.0" fill="rgb(247,221,43)" rx="2" ry="2" />
+<text  x="336.88" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           21400 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_check_len+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (670,223,039 samples, 0.07%)</title><rect x="1050.8" y="277" width="0.9" height="15.0" fill="rgb(246,151,6)" rx="2" ry="2" />
+<text  x="1053.79" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1939e __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::operator++0x50 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (186,592,361 samples, 0.02%)</title><rect x="877.1" y="277" width="0.3" height="15.0" fill="rgb(208,211,46)" rx="2" ry="2" />
+<text  x="880.13" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,797,000,000 samples, 3.17%)</title><rect x="1149.0" y="197" width="37.5" height="15.0" fill="rgb(222,151,43)" rx="2" ry="2" />
+<text  x="1152.01" y="207.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           2092b std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0x67 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (247,290,867 samples, 0.03%)</title><rect x="1032.0" y="277" width="0.3" height="15.0" fill="rgb(231,221,46)" rx="2" ry="2" />
+<text  x="1034.99" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           192e8 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::emplace_back&lt;int&gt;+0xa2 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (391,037,839 samples, 0.04%)</title><rect x="873.4" y="277" width="0.5" height="15.0" fill="rgb(224,206,20)" rx="2" ry="2" />
+<text  x="876.38" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fec1 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::emplace_back&lt;Node&lt;int&gt;*&gt;+0x93 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,051,230,046 samples, 0.12%)</title><rect x="326.4" y="277" width="1.3" height="15.0" fill="rgb(242,29,16)" rx="2" ry="2" />
+<text  x="329.38" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20a09 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0x145 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (941,328,560 samples, 0.10%)</title><rect x="1036.0" y="277" width="1.2" height="15.0" fill="rgb(229,63,45)" rx="2" ry="2" />
+<text  x="1038.96" y="287.5" ></text>
+</g>
+<g >
+<title>unlink_chunk.constprop.0 (1,018,750,000 samples, 0.11%)</title><rect x="1188.7" y="261" width="1.3" height="15.0" fill="rgb(247,168,49)" rx="2" ry="2" />
+<text  x="1191.68" y="271.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15b17 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::~vector+0x39 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (285,547,137 samples, 0.03%)</title><rect x="473.2" y="277" width="0.3" height="15.0" fill="rgb(211,195,40)" rx="2" ry="2" />
+<text  x="476.17" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fc75 std::allocator_traits&lt;std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::construct&lt;Node&lt;int&gt;*, Node&lt;int&gt;* const&amp;&gt;+0x3a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (146,968,784 samples, 0.02%)</title><rect x="323.3" y="277" width="0.2" height="15.0" fill="rgb(237,218,11)" rx="2" ry="2" />
+<text  x="326.29" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bcd8 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x17e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (215,902,228 samples, 0.02%)</title><rect x="923.1" y="277" width="0.3" height="15.0" fill="rgb(216,68,12)" rx="2" ry="2" />
+<text  x="926.08" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1658d std::random_shuffle&lt;__gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt; &gt;+0xa3 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (109,332,946 samples, 0.01%)</title><rect x="626.9" y="277" width="0.2" height="15.0" fill="rgb(229,8,49)" rx="2" ry="2" />
+<text  x="629.93" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bba5 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x4b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (385,188,991 samples, 0.04%)</title><rect x="918.5" y="277" width="0.5" height="15.0" fill="rgb(244,106,29)" rx="2" ry="2" />
+<text  x="921.50" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17df5 Node&lt;int&gt;::GetKeyValue+0x2d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (20,711,498,501 samples, 2.28%)</title><rect x="634.0" y="277" width="26.9" height="15.0" fill="rgb(243,151,7)" rx="2" ry="2" />
+<text  x="636.99" y="287.5" >U..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (182,000,000 samples, 0.02%)</title><rect x="1146.7" y="229" width="0.2" height="15.0" fill="rgb(209,79,43)" rx="2" ry="2" />
+<text  x="1149.68" y="239.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18512 BPlusTree&lt;int&gt;::InsertInterNode+0x76 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (220,373,439 samples, 0.02%)</title><rect x="805.0" y="277" width="0.2" height="15.0" fill="rgb(207,12,10)" rx="2" ry="2" />
+<text  x="807.95" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           10cdf std::allocator_traits&lt;std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::construct&lt;Node&lt;int&gt;*, Node&lt;int&gt;*&gt;+0x3a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (620,707,582 samples, 0.07%)</title><rect x="329.0" y="277" width="0.8" height="15.0" fill="rgb(253,226,40)" rx="2" ry="2" />
+<text  x="331.99" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18a9e LeafNode&lt;int&gt;::~LeafNode+0x2e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (5,842,500,800 samples, 0.64%)</title><rect x="842.3" y="277" width="7.6" height="15.0" fill="rgb(217,118,0)" rx="2" ry="2" />
+<text  x="845.33" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18850 std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::_M_deallocate+0x38 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (101,894,525 samples, 0.01%)</title><rect x="841.7" y="277" width="0.1" height="15.0" fill="rgb(231,29,20)" rx="2" ry="2" />
+<text  x="844.68" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1521c std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::_Vector_impl::~_Vector_impl+0x14 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (112,728,812 samples, 0.01%)</title><rect x="471.7" y="277" width="0.2" height="15.0" fill="rgb(243,171,14)" rx="2" ry="2" />
+<text  x="474.73" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20bc0 __gnu_cxx::__normal_iterator&lt;Node&lt;int&gt;**, std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;::__normal_iterator+0x1e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (126,907,772 samples, 0.01%)</title><rect x="1040.4" y="277" width="0.2" height="15.0" fill="rgb(216,60,38)" rx="2" ry="2" />
+<text  x="1043.39" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,699,000,000 samples, 3.16%)</title><rect x="1149.1" y="69" width="37.4" height="15.0" fill="rgb(212,137,2)" rx="2" ry="2" />
+<text  x="1152.14" y="79.5" >[[k..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (176,750,000 samples, 0.02%)</title><rect x="1146.7" y="85" width="0.2" height="15.0" fill="rgb(232,111,35)" rx="2" ry="2" />
+<text  x="1149.69" y="95.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,906,000,000 samples, 3.18%)</title><rect x="1148.9" y="245" width="37.6" height="15.0" fill="rgb(223,200,32)" rx="2" ry="2" />
+<text  x="1151.87" y="255.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           204d2 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_realloc_insert&lt;unsigned long const&amp;&gt;+0x7e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (174,467,775 samples, 0.02%)</title><rect x="1018.5" y="277" width="0.3" height="15.0" fill="rgb(239,203,47)" rx="2" ry="2" />
+<text  x="1021.55" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18548 BPlusTree&lt;int&gt;::InsertInterNode+0xac (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (6,722,890,999 samples, 0.74%)</title><rect x="805.3" y="277" width="8.7" height="15.0" fill="rgb(241,194,23)" rx="2" ry="2" />
+<text  x="808.27" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e687 Node&lt;int&gt;::GetCount+0x5 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (358,927,735 samples, 0.04%)</title><rect x="307.5" y="277" width="0.5" height="15.0" fill="rgb(209,72,52)" rx="2" ry="2" />
+<text  x="310.53" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17f4e std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::vector+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (139,734,251 samples, 0.02%)</title><rect x="731.3" y="277" width="0.1" height="15.0" fill="rgb(249,32,23)" rx="2" ry="2" />
+<text  x="734.26" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c427 InterNode&lt;int&gt;::Split+0x149 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (283,471,905 samples, 0.03%)</title><rect x="953.9" y="277" width="0.4" height="15.0" fill="rgb(227,196,47)" rx="2" ry="2" />
+<text  x="956.95" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (686,750,000 samples, 0.08%)</title><rect x="1187.8" y="197" width="0.9" height="15.0" fill="rgb(240,178,17)" rx="2" ry="2" />
+<text  x="1190.78" y="207.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            f21d std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::empty+0x2b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (130,442,581 samples, 0.01%)</title><rect x="315.5" y="277" width="0.2" height="15.0" fill="rgb(252,216,1)" rx="2" ry="2" />
+<text  x="318.55" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d9aa BPlusTree&lt;int&gt;::DeleteAll+0x152 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (104,733,387 samples, 0.01%)</title><rect x="251.3" y="277" width="0.2" height="15.0" fill="rgb(211,172,48)" rx="2" ry="2" />
+<text  x="254.32" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bc04 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0xaa (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (88,584,982 samples, 0.01%)</title><rect x="919.7" y="277" width="0.2" height="15.0" fill="rgb(206,103,34)" rx="2" ry="2" />
+<text  x="922.74" y="287.5" ></text>
+</g>
+<g >
+<title>virtual thunk to std::basic_ostream&lt;char, std::char_traits&lt;char&gt; &gt;::~basic_ostream (133,000,000 samples, 0.01%)</title><rect x="1116.3" y="245" width="0.2" height="15.0" fill="rgb(217,8,3)" rx="2" ry="2" />
+<text  x="1119.32" y="255.5" ></text>
+</g>
+<g >
+<title>_IO_fwrite (158,250,000 samples, 0.02%)</title><rect x="1116.5" y="261" width="0.2" height="15.0" fill="rgb(220,226,12)" rx="2" ry="2" />
+<text  x="1119.52" y="271.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17ede BPlusTree&lt;int&gt;::SearchLeafNode+0xa6 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (110,970,397 samples, 0.01%)</title><rect x="729.9" y="277" width="0.1" height="15.0" fill="rgb(217,34,7)" rx="2" ry="2" />
+<text  x="732.90" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ba03 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0xf5 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (83,393,163 samples, 0.01%)</title><rect x="902.8" y="277" width="0.1" height="15.0" fill="rgb(208,98,45)" rx="2" ry="2" />
+<text  x="905.75" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            f28d std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::pop_front+0x19 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (79,207,943 samples, 0.01%)</title><rect x="316.9" y="277" width="0.1" height="15.0" fill="rgb(221,81,11)" rx="2" ry="2" />
+<text  x="319.93" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20e7c std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_insert_aux&lt;Node&lt;int&gt;*&gt;+0x92 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (200,354,244 samples, 0.02%)</title><rect x="1042.1" y="277" width="0.2" height="15.0" fill="rgb(243,99,42)" rx="2" ry="2" />
+<text  x="1045.09" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17dd8 Node&lt;int&gt;::GetKeyValue+0x10 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (346,367,791 samples, 0.04%)</title><rect x="630.8" y="277" width="0.5" height="15.0" fill="rgb(213,24,6)" rx="2" ry="2" />
+<text  x="633.83" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e7a BPlusTree&lt;int&gt;::SearchLeafNode+0x42 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (142,840,728 samples, 0.02%)</title><rect x="687.5" y="277" width="0.2" height="15.0" fill="rgb(207,157,26)" rx="2" ry="2" />
+<text  x="690.52" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18499 Node&lt;int&gt;::SetCount+0x19 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (137,351,484 samples, 0.02%)</title><rect x="798.4" y="277" width="0.2" height="15.0" fill="rgb(208,52,9)" rx="2" ry="2" />
+<text  x="801.39" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,906,000,000 samples, 3.18%)</title><rect x="1148.9" y="213" width="37.6" height="15.0" fill="rgb(233,115,52)" rx="2" ry="2" />
+<text  x="1151.87" y="223.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c6c5 InterNode&lt;int&gt;::Split+0x3e7 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,148,560,245 samples, 0.13%)</title><rect x="956.4" y="277" width="1.5" height="15.0" fill="rgb(209,21,20)" rx="2" ry="2" />
+<text  x="959.42" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1805e LeafNode&lt;int&gt;::Insert+0xa6 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (298,844,551 samples, 0.03%)</title><rect x="737.8" y="277" width="0.4" height="15.0" fill="rgb(210,10,23)" rx="2" ry="2" />
+<text  x="740.85" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bf82 __gnu_cxx::__normal_iterator&lt;Node&lt;int&gt;**, std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;::operator++0x4c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (138,944,601 samples, 0.02%)</title><rect x="938.5" y="277" width="0.2" height="15.0" fill="rgb(215,50,13)" rx="2" ry="2" />
+<text  x="941.53" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           19302 __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::__normal_iterator+0x14 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (131,706,267 samples, 0.01%)</title><rect x="874.4" y="277" width="0.2" height="15.0" fill="rgb(249,74,41)" rx="2" ry="2" />
+<text  x="877.39" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1939a __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::operator++0x4c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (241,003,801 samples, 0.03%)</title><rect x="876.8" y="277" width="0.3" height="15.0" fill="rgb(228,168,10)" rx="2" ry="2" />
+<text  x="879.82" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bc29 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0xcf (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (115,286,390 samples, 0.01%)</title><rect x="919.9" y="277" width="0.2" height="15.0" fill="rgb(211,61,2)" rx="2" ry="2" />
+<text  x="922.91" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fe89 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::emplace_back&lt;Node&lt;int&gt;*&gt;+0x5b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (142,824,457 samples, 0.02%)</title><rect x="325.8" y="277" width="0.2" height="15.0" fill="rgb(234,195,51)" rx="2" ry="2" />
+<text  x="328.81" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1baae std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x1a0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (189,319,528 samples, 0.02%)</title><rect x="907.5" y="277" width="0.3" height="15.0" fill="rgb(207,89,17)" rx="2" ry="2" />
+<text  x="910.52" y="287.5" ></text>
+</g>
+<g >
+<title>malloc (215,000,000 samples, 0.02%)</title><rect x="1186.5" y="261" width="0.3" height="15.0" fill="rgb(244,169,6)" rx="2" ry="2" />
+<text  x="1189.55" y="271.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d977 BPlusTree&lt;int&gt;::DeleteAll+0x11f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (171,046,076 samples, 0.02%)</title><rect x="250.5" y="277" width="0.3" height="15.0" fill="rgb(210,35,18)" rx="2" ry="2" />
+<text  x="253.54" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c180 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::insert+0x1b6 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,802,094,912 samples, 0.31%)</title><rect x="941.3" y="277" width="3.7" height="15.0" fill="rgb(216,229,6)" rx="2" ry="2" />
+<text  x="944.31" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17ed8 BPlusTree&lt;int&gt;::SearchLeafNode+0xa0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (106,980,421 samples, 0.01%)</title><rect x="718.8" y="277" width="0.2" height="15.0" fill="rgb(205,191,49)" rx="2" ry="2" />
+<text  x="721.84" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           21358 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::operator[]+0x8 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (86,755,479 samples, 0.01%)</title><rect x="1048.4" y="277" width="0.1" height="15.0" fill="rgb(235,224,46)" rx="2" ry="2" />
+<text  x="1051.41" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (683,500,000 samples, 0.08%)</title><rect x="1187.8" y="69" width="0.9" height="15.0" fill="rgb(240,80,52)" rx="2" ry="2" />
+<text  x="1190.79" y="79.5" ></text>
+</g>
+<g >
+<title>_int_malloc (29,113,750,000 samples, 3.21%)</title><rect x="1148.6" y="261" width="37.9" height="15.0" fill="rgb(215,102,18)" rx="2" ry="2" />
+<text  x="1151.60" y="271.5" >_in..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           19387 __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::operator++0x39 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (100,442,013 samples, 0.01%)</title><rect x="876.6" y="277" width="0.1" height="15.0" fill="rgb(211,131,31)" rx="2" ry="2" />
+<text  x="879.62" y="287.5" ></text>
+</g>
+<g >
+<title>__random (130,750,000 samples, 0.01%)</title><rect x="1146.9" y="245" width="0.2" height="15.0" fill="rgb(245,152,36)" rx="2" ry="2" />
+<text  x="1149.92" y="255.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           16576 std::random_shuffle&lt;__gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt; &gt;+0x8c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (96,073,315 samples, 0.01%)</title><rect x="626.8" y="277" width="0.1" height="15.0" fill="rgb(207,3,11)" rx="2" ry="2" />
+<text  x="629.80" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c281 InterNode&lt;int&gt;::Insert+0x99 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,756,950,110 samples, 0.30%)</title><rect x="946.0" y="277" width="3.5" height="15.0" fill="rgb(236,84,51)" rx="2" ry="2" />
+<text  x="948.95" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15b51 BPlusTree&lt;int&gt;::Insert+0x2b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (54,215,383,048 samples, 5.97%)</title><rect x="482.6" y="277" width="70.5" height="15.0" fill="rgb(212,119,28)" rx="2" ry="2" />
+<text  x="485.57" y="287.5" >Unrecog..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           16480 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::begin+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (780,489,264 samples, 0.09%)</title><rect x="624.5" y="277" width="1.0" height="15.0" fill="rgb(219,96,17)" rx="2" ry="2" />
+<text  x="627.51" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e6c8 std::queue&lt;Node&lt;int&gt;*, std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;::push+0x30 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (3,016,080,441 samples, 0.33%)</title><rect x="309.7" y="277" width="3.9" height="15.0" fill="rgb(242,158,1)" rx="2" ry="2" />
+<text  x="312.69" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           180e3 LeafNode&lt;int&gt;::Insert+0x12b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (9,902,128,758 samples, 1.09%)</title><rect x="757.0" y="277" width="12.9" height="15.0" fill="rgb(218,87,35)" rx="2" ry="2" />
+<text  x="760.03" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b790 std::_Vector_base&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::~_Vector_base+0x18 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (118,855,436 samples, 0.01%)</title><rect x="884.5" y="277" width="0.1" height="15.0" fill="rgb(229,95,22)" rx="2" ry="2" />
+<text  x="887.49" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e67c Node&lt;int&gt;::GetNodeType+0x10 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (204,255,910 samples, 0.02%)</title><rect x="275.7" y="277" width="0.2" height="15.0" fill="rgb(219,191,31)" rx="2" ry="2" />
+<text  x="278.67" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d918 BPlusTree&lt;int&gt;::DeleteAll+0xc0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (877,233,335 samples, 0.10%)</title><rect x="233.5" y="277" width="1.1" height="15.0" fill="rgb(213,26,5)" rx="2" ry="2" />
+<text  x="236.45" y="287.5" ></text>
+</g>
+<g >
+<title>_int_free (96,750,000 samples, 0.01%)</title><rect x="1112.6" y="229" width="0.1" height="15.0" fill="rgb(212,142,42)" rx="2" ry="2" />
+<text  x="1115.59" y="239.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           165a4 std::random_shuffle&lt;__gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt; &gt;+0xba (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,268,034,473 samples, 0.25%)</title><rect x="627.1" y="277" width="2.9" height="15.0" fill="rgb(251,161,17)" rx="2" ry="2" />
+<text  x="630.10" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d9e1 BPlusTree&lt;int&gt;::DeleteAll+0x189 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (325,300,907 samples, 0.04%)</title><rect x="272.0" y="277" width="0.4" height="15.0" fill="rgb(240,78,9)" rx="2" ry="2" />
+<text  x="275.01" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2042c std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_insert_aux&lt;unsigned long&gt;+0x92 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (415,036,389 samples, 0.05%)</title><rect x="1015.0" y="277" width="0.5" height="15.0" fill="rgb(225,187,4)" rx="2" ry="2" />
+<text  x="1017.97" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24bf1 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_S_do_relocate+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (593,470,278 samples, 0.07%)</title><rect x="1094.5" y="277" width="0.8" height="15.0" fill="rgb(232,155,12)" rx="2" ry="2" />
+<text  x="1097.48" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15bef BPlusTree&lt;int&gt;::Insert+0xc9 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (651,183,135 samples, 0.07%)</title><rect x="578.7" y="277" width="0.8" height="15.0" fill="rgb(212,107,40)" rx="2" ry="2" />
+<text  x="581.69" y="287.5" ></text>
+</g>
+<g >
+<title>__GI___libc_write (2,372,500,000 samples, 0.26%)</title><rect x="1112.9" y="245" width="3.1" height="15.0" fill="rgb(239,73,2)" rx="2" ry="2" />
+<text  x="1115.90" y="255.5" ></text>
+</g>
+<g >
+<title>__libc_start_call_main (24,415,750,000 samples, 2.69%)</title><rect x="1116.7" y="261" width="31.8" height="15.0" fill="rgb(232,188,17)" rx="2" ry="2" />
+<text  x="1119.73" y="271.5" >__..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,299,250,000 samples, 0.25%)</title><rect x="1113.0" y="53" width="3.0" height="15.0" fill="rgb(242,59,21)" rx="2" ry="2" />
+<text  x="1115.99" y="63.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           13b52 Tree+0x7ce (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (90,935,699,510 samples, 10.02%)</title><rect x="353.4" y="277" width="118.2" height="15.0" fill="rgb(254,8,6)" rx="2" ry="2" />
+<text  x="356.41" y="287.5" >Unrecognized l..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           15e6c std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::~_Vector_base+0x42 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (5,862,975,894 samples, 0.65%)</title><rect x="613.4" y="277" width="7.6" height="15.0" fill="rgb(206,150,35)" rx="2" ry="2" />
+<text  x="616.41" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b6a1 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::operator[]+0x17 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (601,382,279 samples, 0.07%)</title><rect x="882.1" y="277" width="0.8" height="15.0" fill="rgb(212,224,42)" rx="2" ry="2" />
+<text  x="885.09" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c117 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::insert+0x14d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (387,434,607 samples, 0.04%)</title><rect x="940.2" y="277" width="0.5" height="15.0" fill="rgb(212,71,2)" rx="2" ry="2" />
+<text  x="943.19" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18441 Node&lt;int&gt;::SetKeyValue+0x83 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (3,554,776,594 samples, 0.39%)</title><rect x="793.1" y="277" width="4.7" height="15.0" fill="rgb(231,172,22)" rx="2" ry="2" />
+<text  x="796.15" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c131 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::insert+0x167 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (78,000,623 samples, 0.01%)</title><rect x="940.8" y="277" width="0.1" height="15.0" fill="rgb(237,12,7)" rx="2" ry="2" />
+<text  x="943.76" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           234a7 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_S_do_relocate+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,901,748,989 samples, 0.21%)</title><rect x="1082.3" y="277" width="2.5" height="15.0" fill="rgb(245,115,25)" rx="2" ry="2" />
+<text  x="1085.32" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,906,000,000 samples, 3.18%)</title><rect x="1148.9" y="229" width="37.6" height="15.0" fill="rgb(211,52,30)" rx="2" ry="2" />
+<text  x="1151.87" y="239.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           18aae LeafNode&lt;int&gt;::~LeafNode+0x0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (98,972,051 samples, 0.01%)</title><rect x="856.8" y="277" width="0.1" height="15.0" fill="rgb(213,45,52)" rx="2" ry="2" />
+<text  x="859.80" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20bb9 __gnu_cxx::__normal_iterator&lt;Node&lt;int&gt;**, std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;::__normal_iterator+0x17 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (224,030,428 samples, 0.02%)</title><rect x="1040.1" y="277" width="0.3" height="15.0" fill="rgb(206,79,30)" rx="2" ry="2" />
+<text  x="1043.08" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           23363 std::move&lt;__gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;, __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt; &gt;+0x49 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (107,126,423 samples, 0.01%)</title><rect x="1079.3" y="277" width="0.1" height="15.0" fill="rgb(250,210,25)" rx="2" ry="2" />
+<text  x="1082.31" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e35 std::_Destroy&lt;int*, int&gt;+0x2b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (166,653,611 samples, 0.02%)</title><rect x="661.4" y="277" width="0.2" height="15.0" fill="rgb(205,208,10)" rx="2" ry="2" />
+<text  x="664.43" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b959 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x4b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (264,643,278 samples, 0.03%)</title><rect x="901.3" y="277" width="0.3" height="15.0" fill="rgb(239,18,36)" rx="2" ry="2" />
+<text  x="904.27" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d901 BPlusTree&lt;int&gt;::DeleteAll+0xa9 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (182,189,890 samples, 0.02%)</title><rect x="233.1" y="277" width="0.2" height="15.0" fill="rgb(253,137,29)" rx="2" ry="2" />
+<text  x="236.07" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17f8c LeafNode&lt;int&gt;::LeafNode+0x3a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (182,278,376 samples, 0.02%)</title><rect x="731.9" y="277" width="0.2" height="15.0" fill="rgb(230,89,43)" rx="2" ry="2" />
+<text  x="734.91" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c3e8 InterNode&lt;int&gt;::Split+0x10a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (289,878,988 samples, 0.03%)</title><rect x="953.5" y="277" width="0.4" height="15.0" fill="rgb(233,150,33)" rx="2" ry="2" />
+<text  x="956.55" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c015 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::insert+0x4b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (107,842,585 samples, 0.01%)</title><rect x="939.3" y="277" width="0.2" height="15.0" fill="rgb(226,74,16)" rx="2" ry="2" />
+<text  x="942.31" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c538 InterNode&lt;int&gt;::Split+0x25a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (159,813,042 samples, 0.02%)</title><rect x="954.7" y="277" width="0.2" height="15.0" fill="rgb(228,192,53)" rx="2" ry="2" />
+<text  x="957.69" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2073c __gnu_cxx::operator-&lt;int const*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;+0x24 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (86,572,977 samples, 0.01%)</title><rect x="1026.7" y="277" width="0.1" height="15.0" fill="rgb(216,50,3)" rx="2" ry="2" />
+<text  x="1029.66" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           204bb std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_realloc_insert&lt;unsigned long const&amp;&gt;+0x67 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (214,816,643 samples, 0.02%)</title><rect x="1018.2" y="277" width="0.3" height="15.0" fill="rgb(214,25,44)" rx="2" ry="2" />
+<text  x="1021.20" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           27182 std::__copy_move_a1&lt;true, Node&lt;int&gt;**, Node&lt;int&gt;**&gt;+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (152,326,374 samples, 0.02%)</title><rect x="1110.5" y="277" width="0.2" height="15.0" fill="rgb(231,24,46)" rx="2" ry="2" />
+<text  x="1113.52" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22dc9 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_check_len+0xbd (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (490,110,093 samples, 0.05%)</title><rect x="1068.7" y="277" width="0.7" height="15.0" fill="rgb(232,168,18)" rx="2" ry="2" />
+<text  x="1071.74" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ba75 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x167 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (173,407,594 samples, 0.02%)</title><rect x="906.6" y="277" width="0.2" height="15.0" fill="rgb(222,229,23)" rx="2" ry="2" />
+<text  x="909.59" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17ebe BPlusTree&lt;int&gt;::SearchLeafNode+0x86 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (131,694,062 samples, 0.01%)</title><rect x="717.5" y="277" width="0.2" height="15.0" fill="rgb(234,11,41)" rx="2" ry="2" />
+<text  x="720.49" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b692 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::operator[]+0x8 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (296,094,786 samples, 0.03%)</title><rect x="881.2" y="277" width="0.4" height="15.0" fill="rgb(252,163,2)" rx="2" ry="2" />
+<text  x="884.21" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25f79 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_S_max_size+0x39 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (138,208,492 samples, 0.02%)</title><rect x="1105.8" y="277" width="0.2" height="15.0" fill="rgb(252,221,31)" rx="2" ry="2" />
+<text  x="1108.82" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18604 BPlusTree&lt;int&gt;::InsertInterNode+0x168 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (163,008,977 samples, 0.02%)</title><rect x="816.2" y="277" width="0.2" height="15.0" fill="rgb(230,17,43)" rx="2" ry="2" />
+<text  x="819.19" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bd3d std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x1e3 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (78,657,581 samples, 0.01%)</title><rect x="934.7" y="277" width="0.1" height="15.0" fill="rgb(249,0,28)" rx="2" ry="2" />
+<text  x="937.66" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           27de9 std::__copy_move_a2&lt;true, Node&lt;int&gt;**, Node&lt;int&gt;**&gt;+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (122,827,772 samples, 0.01%)</title><rect x="1111.8" y="277" width="0.2" height="15.0" fill="rgb(219,90,51)" rx="2" ry="2" />
+<text  x="1114.84" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e08 std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::_M_get_Tp_allocator+0x10 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (86,860,387 samples, 0.01%)</title><rect x="661.2" y="277" width="0.1" height="15.0" fill="rgb(221,158,6)" rx="2" ry="2" />
+<text  x="664.20" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           10ca3 std::forward&lt;Node&lt;int&gt;*&gt;+0x10 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (108,018,325 samples, 0.01%)</title><rect x="328.6" y="277" width="0.2" height="15.0" fill="rgb(250,155,28)" rx="2" ry="2" />
+<text  x="331.63" y="287.5" ></text>
+</g>
+<g >
+<title>[unknown] (505,000,000 samples, 0.06%)</title><rect x="1112.2" y="245" width="0.6" height="15.0" fill="rgb(254,192,28)" rx="2" ry="2" />
+<text  x="1115.19" y="255.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17ec5 BPlusTree&lt;int&gt;::SearchLeafNode+0x8d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (355,072,810 samples, 0.04%)</title><rect x="717.8" y="277" width="0.5" height="15.0" fill="rgb(246,66,49)" rx="2" ry="2" />
+<text  x="720.83" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15e7a std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::~_Vector_base+0x50 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (87,507,025 samples, 0.01%)</title><rect x="621.6" y="277" width="0.1" height="15.0" fill="rgb(245,128,42)" rx="2" ry="2" />
+<text  x="624.58" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e674 Node&lt;int&gt;::GetNodeType+0x8 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (149,731,312 samples, 0.02%)</title><rect x="275.4" y="277" width="0.2" height="15.0" fill="rgb(215,127,38)" rx="2" ry="2" />
+<text  x="278.45" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           21367 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::operator[]+0x17 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (903,455,738 samples, 0.10%)</title><rect x="1048.9" y="277" width="1.2" height="15.0" fill="rgb(211,186,6)" rx="2" ry="2" />
+<text  x="1051.92" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           184f8 BPlusTree&lt;int&gt;::InsertInterNode+0x5c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (4,793,823,896 samples, 0.53%)</title><rect x="798.7" y="277" width="6.2" height="15.0" fill="rgb(210,99,8)" rx="2" ry="2" />
+<text  x="801.68" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (176,500,000 samples, 0.02%)</title><rect x="1146.7" y="69" width="0.2" height="15.0" fill="rgb(214,159,26)" rx="2" ry="2" />
+<text  x="1149.69" y="79.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           249d0 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::max_size+0x24 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (851,792,073 samples, 0.09%)</title><rect x="1087.9" y="277" width="1.1" height="15.0" fill="rgb(211,41,6)" rx="2" ry="2" />
+<text  x="1090.94" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b69e std::vector&lt;int, std::allocator&lt;int&gt; &gt;::operator[]+0x14 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (336,838,803 samples, 0.04%)</title><rect x="881.7" y="277" width="0.4" height="15.0" fill="rgb(250,129,18)" rx="2" ry="2" />
+<text  x="884.65" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,717,500,000 samples, 3.16%)</title><rect x="1149.1" y="101" width="37.4" height="15.0" fill="rgb(254,71,17)" rx="2" ry="2" />
+<text  x="1152.11" y="111.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           119de __gnu_cxx::new_allocator&lt;Node&lt;int&gt;*&gt;::construct&lt;Node&lt;int&gt;*, Node&lt;int&gt;*&gt;+0x28 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (118,424,053 samples, 0.01%)</title><rect x="332.6" y="277" width="0.2" height="15.0" fill="rgb(222,199,0)" rx="2" ry="2" />
+<text  x="335.65" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           21489 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_check_len+0xbd (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (667,037,332 samples, 0.07%)</title><rect x="1052.4" y="277" width="0.8" height="15.0" fill="rgb(206,69,36)" rx="2" ry="2" />
+<text  x="1055.38" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            cde0 operator new+0x14 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (137,117,746 samples, 0.02%)</title><rect x="189.6" y="277" width="0.2" height="15.0" fill="rgb(234,110,43)" rx="2" ry="2" />
+<text  x="192.64" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17f0e std::_Vector_base&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_Vector_impl::~_Vector_impl+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (99,130,370 samples, 0.01%)</title><rect x="730.9" y="277" width="0.1" height="15.0" fill="rgb(243,57,13)" rx="2" ry="2" />
+<text  x="733.87" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           261e8 std::allocator_traits&lt;std::allocator&lt;int&gt; &gt;::max_size+0x1d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (84,060,519 samples, 0.01%)</title><rect x="1107.9" y="277" width="0.1" height="15.0" fill="rgb(230,75,42)" rx="2" ry="2" />
+<text  x="1110.87" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1cd13 InterNode&lt;int&gt;::GetChild+0x2b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,746,593,409 samples, 0.19%)</title><rect x="971.5" y="277" width="2.2" height="15.0" fill="rgb(235,101,9)" rx="2" ry="2" />
+<text  x="974.46" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           119f2 __gnu_cxx::new_allocator&lt;Node&lt;int&gt;*&gt;::construct&lt;Node&lt;int&gt;*, Node&lt;int&gt;*&gt;+0x3c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (112,285,253 samples, 0.01%)</title><rect x="333.0" y="277" width="0.1" height="15.0" fill="rgb(248,79,12)" rx="2" ry="2" />
+<text  x="335.96" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24ed7 std::__relocate_a&lt;int*, int*, std::allocator&lt;int&gt; &gt;+0x5e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,197,322,863 samples, 0.13%)</title><rect x="1098.4" y="277" width="1.5" height="15.0" fill="rgb(252,225,40)" rx="2" ry="2" />
+<text  x="1101.37" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bcb3 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x159 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (121,591,499 samples, 0.01%)</title><rect x="922.5" y="277" width="0.2" height="15.0" fill="rgb(241,53,36)" rx="2" ry="2" />
+<text  x="925.51" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15e78 std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::~_Vector_base+0x4e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (364,265,373 samples, 0.04%)</title><rect x="621.1" y="277" width="0.5" height="15.0" fill="rgb(230,148,13)" rx="2" ry="2" />
+<text  x="624.11" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20101 std::_Destroy&lt;unsigned long*, unsigned long&gt;+0x2b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (139,099,405 samples, 0.02%)</title><rect x="1008.4" y="277" width="0.2" height="15.0" fill="rgb(221,52,23)" rx="2" ry="2" />
+<text  x="1011.37" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c784 InterNode&lt;int&gt;::Split+0x4a6 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (421,682,900 samples, 0.05%)</title><rect x="958.3" y="277" width="0.5" height="15.0" fill="rgb(233,4,48)" rx="2" ry="2" />
+<text  x="961.25" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1cd72 InterNode&lt;int&gt;::~InterNode+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (3,891,485,775 samples, 0.43%)</title><rect x="991.1" y="277" width="5.1" height="15.0" fill="rgb(212,22,9)" rx="2" ry="2" />
+<text  x="994.13" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b80f std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::~vector+0x45 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (4,998,275,216 samples, 0.55%)</title><rect x="891.8" y="277" width="6.5" height="15.0" fill="rgb(240,192,19)" rx="2" ry="2" />
+<text  x="894.82" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22e6c std::_Vector_base&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_allocate+0x2e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (339,060,362 samples, 0.04%)</title><rect x="1069.8" y="277" width="0.4" height="15.0" fill="rgb(252,45,7)" rx="2" ry="2" />
+<text  x="1072.78" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17eae BPlusTree&lt;int&gt;::SearchLeafNode+0x76 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (204,435,707 samples, 0.02%)</title><rect x="715.7" y="277" width="0.3" height="15.0" fill="rgb(212,185,21)" rx="2" ry="2" />
+<text  x="718.74" y="287.5" ></text>
+</g>
+<g >
+<title>[unknown] (308,750,000 samples, 0.03%)</title><rect x="1112.2" y="229" width="0.4" height="15.0" fill="rgb(234,161,37)" rx="2" ry="2" />
+<text  x="1115.19" y="239.5" ></text>
+</g>
+<g >
+<title>malloc_consolidate (732,250,000 samples, 0.08%)</title><rect x="1186.8" y="261" width="1.0" height="15.0" fill="rgb(219,87,54)" rx="2" ry="2" />
+<text  x="1189.83" y="271.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b803 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::~vector+0x39 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (249,682,632 samples, 0.03%)</title><rect x="891.5" y="277" width="0.3" height="15.0" fill="rgb(220,179,40)" rx="2" ry="2" />
+<text  x="894.48" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18417 Node&lt;int&gt;::SetKeyValue+0x59 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (114,286,593 samples, 0.01%)</title><rect x="792.8" y="277" width="0.2" height="15.0" fill="rgb(228,0,42)" rx="2" ry="2" />
+<text  x="795.83" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d959 BPlusTree&lt;int&gt;::DeleteAll+0x101 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (3,374,818,817 samples, 0.37%)</title><rect x="241.7" y="277" width="4.4" height="15.0" fill="rgb(236,73,33)" rx="2" ry="2" />
+<text  x="244.73" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           27000 std::allocator_traits&lt;std::allocator&lt;unsigned long&gt; &gt;::max_size+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (127,735,057 samples, 0.01%)</title><rect x="1109.0" y="277" width="0.2" height="15.0" fill="rgb(208,47,20)" rx="2" ry="2" />
+<text  x="1111.99" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2027a std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::cbegin+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (131,799,430 samples, 0.01%)</title><rect x="1011.6" y="277" width="0.2" height="15.0" fill="rgb(210,100,25)" rx="2" ry="2" />
+<text  x="1014.61" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17ee3 BPlusTree&lt;int&gt;::SearchLeafNode+0xab (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (316,325,100 samples, 0.03%)</title><rect x="730.0" y="277" width="0.5" height="15.0" fill="rgb(217,213,35)" rx="2" ry="2" />
+<text  x="733.04" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2089e std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_insert_aux&lt;int&gt;+0x92 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (560,835,304 samples, 0.06%)</title><rect x="1028.0" y="277" width="0.7" height="15.0" fill="rgb(206,71,6)" rx="2" ry="2" />
+<text  x="1030.95" y="287.5" ></text>
+</g>
+<g >
+<title>_int_free (95,250,000 samples, 0.01%)</title><rect x="1148.5" y="261" width="0.1" height="15.0" fill="rgb(243,100,4)" rx="2" ry="2" />
+<text  x="1151.48" y="271.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1884e std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::_M_deallocate+0x36 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (5,974,849,199 samples, 0.66%)</title><rect x="833.9" y="277" width="7.8" height="15.0" fill="rgb(248,11,10)" rx="2" ry="2" />
+<text  x="836.91" y="287.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (913,750,000 samples, 0.10%)</title><rect x="1147.1" y="245" width="1.2" height="15.0" fill="rgb(227,29,18)" rx="2" ry="2" />
+<text  x="1150.11" y="255.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18aca LeafNode&lt;int&gt;::~LeafNode+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (11,309,683,372 samples, 1.25%)</title><rect x="857.0" y="277" width="14.7" height="15.0" fill="rgb(226,66,11)" rx="2" ry="2" />
+<text  x="859.96" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           23239 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_S_relocate+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (651,967,950 samples, 0.07%)</title><rect x="1077.4" y="277" width="0.9" height="15.0" fill="rgb(242,161,53)" rx="2" ry="2" />
+<text  x="1080.43" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ba8c std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x17e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (201,450,154 samples, 0.02%)</title><rect x="906.9" y="277" width="0.2" height="15.0" fill="rgb(205,217,46)" rx="2" ry="2" />
+<text  x="909.89" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e73 BPlusTree&lt;int&gt;::SearchLeafNode+0x3b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (128,147,903 samples, 0.01%)</title><rect x="687.1" y="277" width="0.2" height="15.0" fill="rgb(211,229,45)" rx="2" ry="2" />
+<text  x="690.13" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           214ea std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::_M_allocate+0x2e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (337,500,072 samples, 0.04%)</title><rect x="1053.5" y="277" width="0.5" height="15.0" fill="rgb(236,226,32)" rx="2" ry="2" />
+<text  x="1056.54" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ba5b std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x14d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,379,387,496 samples, 0.26%)</title><rect x="903.3" y="277" width="3.1" height="15.0" fill="rgb(246,125,6)" rx="2" ry="2" />
+<text  x="906.35" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d948 BPlusTree&lt;int&gt;::DeleteAll+0xf0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (78,538,042 samples, 0.01%)</title><rect x="241.6" y="277" width="0.1" height="15.0" fill="rgb(230,18,49)" rx="2" ry="2" />
+<text  x="244.61" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           19296 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::emplace_back&lt;int&gt;+0x50 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (301,847,536 samples, 0.03%)</title><rect x="872.0" y="277" width="0.4" height="15.0" fill="rgb(219,162,52)" rx="2" ry="2" />
+<text  x="875.03" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20f39 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_realloc_insert&lt;Node&lt;int&gt;* const&amp;&gt;+0x95 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (185,136,436 samples, 0.02%)</title><rect x="1043.7" y="277" width="0.3" height="15.0" fill="rgb(233,68,29)" rx="2" ry="2" />
+<text  x="1046.74" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18aaa LeafNode&lt;int&gt;::~LeafNode+0x3a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (5,232,128,496 samples, 0.58%)</title><rect x="850.0" y="277" width="6.8" height="15.0" fill="rgb(219,16,40)" rx="2" ry="2" />
+<text  x="852.96" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            f2df std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::pop_front+0x6b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (111,048,483 samples, 0.01%)</title><rect x="317.6" y="277" width="0.1" height="15.0" fill="rgb(241,0,42)" rx="2" ry="2" />
+<text  x="320.57" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           23471 std::allocator_traits&lt;std::allocator&lt;int&gt; &gt;::allocate+0x2c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (254,828,674 samples, 0.03%)</title><rect x="1081.8" y="277" width="0.3" height="15.0" fill="rgb(252,168,42)" rx="2" ry="2" />
+<text  x="1084.77" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24dba std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_S_max_size+0x39 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (379,950,941 samples, 0.04%)</title><rect x="1096.1" y="277" width="0.5" height="15.0" fill="rgb(245,4,32)" rx="2" ry="2" />
+<text  x="1099.12" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           13a99 Tree+0x715 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (3,573,025,577 samples, 0.39%)</title><rect x="348.4" y="277" width="4.6" height="15.0" fill="rgb(249,134,50)" rx="2" ry="2" />
+<text  x="351.37" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17ea9 BPlusTree&lt;int&gt;::SearchLeafNode+0x71 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (19,789,549,703 samples, 2.18%)</title><rect x="690.0" y="277" width="25.7" height="15.0" fill="rgb(212,106,23)" rx="2" ry="2" />
+<text  x="693.01" y="287.5" >U..</text>
+</g>
+<g >
+<title>main (59,912,750,000 samples, 6.60%)</title><rect x="1112.1" y="277" width="77.9" height="15.0" fill="rgb(252,165,8)" rx="2" ry="2" />
+<text  x="1115.11" y="287.5" >main</text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b8ca __gnu_cxx::__normal_iterator&lt;unsigned long*, std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt; &gt;::operator++0x50 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (94,612,124 samples, 0.01%)</title><rect x="900.3" y="277" width="0.2" height="15.0" fill="rgb(216,211,35)" rx="2" ry="2" />
+<text  x="903.34" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1d7b9 std::swap&lt;int&gt;+0x42 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,991,459,397 samples, 0.22%)</title><rect x="999.0" y="277" width="2.6" height="15.0" fill="rgb(247,148,22)" rx="2" ry="2" />
+<text  x="1001.98" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18835 std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::_M_deallocate+0x1d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (84,546,099 samples, 0.01%)</title><rect x="833.7" y="277" width="0.1" height="15.0" fill="rgb(241,94,16)" rx="2" ry="2" />
+<text  x="836.71" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bedb std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::~vector+0x39 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (103,626,261 samples, 0.01%)</title><rect x="936.4" y="277" width="0.2" height="15.0" fill="rgb(211,197,53)" rx="2" ry="2" />
+<text  x="939.43" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c7db InterNode&lt;int&gt;::Split+0x4fd (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (701,084,733 samples, 0.08%)</title><rect x="958.9" y="277" width="1.0" height="15.0" fill="rgb(253,49,19)" rx="2" ry="2" />
+<text  x="961.94" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b68a std::vector&lt;int, std::allocator&lt;int&gt; &gt;::operator[]+0x0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (287,552,544 samples, 0.03%)</title><rect x="880.8" y="277" width="0.4" height="15.0" fill="rgb(218,8,15)" rx="2" ry="2" />
+<text  x="883.80" y="287.5" ></text>
+</g>
+<g >
+<title>all (907,629,795,849 samples, 100%)</title><rect x="10.0" y="293" width="1180.0" height="15.0" fill="rgb(248,1,46)" rx="2" ry="2" />
+<text  x="13.00" y="303.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (684,000,000 samples, 0.08%)</title><rect x="1187.8" y="101" width="0.9" height="15.0" fill="rgb(238,164,4)" rx="2" ry="2" />
+<text  x="1190.79" y="111.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (176,750,000 samples, 0.02%)</title><rect x="1146.7" y="101" width="0.2" height="15.0" fill="rgb(222,124,4)" rx="2" ry="2" />
+<text  x="1149.69" y="111.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           249e6 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::size+0x14 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (83,085,319 samples, 0.01%)</title><rect x="1089.2" y="277" width="0.1" height="15.0" fill="rgb(244,111,33)" rx="2" ry="2" />
+<text  x="1092.24" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           209aa std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0xe6 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (92,831,441 samples, 0.01%)</title><rect x="1034.4" y="277" width="0.1" height="15.0" fill="rgb(207,35,11)" rx="2" ry="2" />
+<text  x="1037.37" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20494 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_realloc_insert&lt;unsigned long const&amp;&gt;+0x40 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,775,857,640 samples, 0.20%)</title><rect x="1015.8" y="277" width="2.3" height="15.0" fill="rgb(236,198,46)" rx="2" ry="2" />
+<text  x="1018.77" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20a47 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0x183 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (97,186,518 samples, 0.01%)</title><rect x="1038.1" y="277" width="0.1" height="15.0" fill="rgb(242,173,4)" rx="2" ry="2" />
+<text  x="1041.10" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bcfa std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x1a0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (288,558,151 samples, 0.03%)</title><rect x="923.9" y="277" width="0.3" height="15.0" fill="rgb(231,13,30)" rx="2" ry="2" />
+<text  x="926.86" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           164d0 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::end+0x36 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (140,792,317 samples, 0.02%)</title><rect x="626.1" y="277" width="0.2" height="15.0" fill="rgb(230,68,32)" rx="2" ry="2" />
+<text  x="629.13" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           10de6 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::back+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (659,267,718 samples, 0.07%)</title><rect x="330.2" y="277" width="0.9" height="15.0" fill="rgb(212,92,41)" rx="2" ry="2" />
+<text  x="333.21" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1d52c std::allocator_traits&lt;std::allocator&lt;int&gt; &gt;::construct&lt;int, int&gt;+0x3a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (309,989,749 samples, 0.03%)</title><rect x="996.3" y="277" width="0.4" height="15.0" fill="rgb(236,175,28)" rx="2" ry="2" />
+<text  x="999.34" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18739 BPlusTree&lt;int&gt;::InsertInterNode+0x29d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (5,030,538,500 samples, 0.55%)</title><rect x="816.4" y="277" width="6.6" height="15.0" fill="rgb(231,77,30)" rx="2" ry="2" />
+<text  x="819.44" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22cf0 std::move_backward&lt;unsigned long*, unsigned long*&gt;+0x49 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (382,689,173 samples, 0.04%)</title><rect x="1066.7" y="277" width="0.5" height="15.0" fill="rgb(240,3,47)" rx="2" ry="2" />
+<text  x="1069.74" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (177,000,000 samples, 0.02%)</title><rect x="1146.7" y="149" width="0.2" height="15.0" fill="rgb(228,171,29)" rx="2" ry="2" />
+<text  x="1149.69" y="159.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            f32a std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::push_back+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,800,311,997 samples, 0.31%)</title><rect x="318.1" y="277" width="3.6" height="15.0" fill="rgb(243,206,13)" rx="2" ry="2" />
+<text  x="321.07" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bb4f __gnu_cxx::__normal_iterator&lt;int const*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::__normal_iterator&lt;int*&gt;+0x23 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (115,144,830 samples, 0.01%)</title><rect x="917.5" y="277" width="0.2" height="15.0" fill="rgb(217,55,46)" rx="2" ry="2" />
+<text  x="920.53" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bce7 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x18d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (321,567,294 samples, 0.04%)</title><rect x="923.4" y="277" width="0.4" height="15.0" fill="rgb(212,167,40)" rx="2" ry="2" />
+<text  x="926.39" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15b23 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::~vector+0x45 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (6,789,465,569 samples, 0.75%)</title><rect x="473.6" y="277" width="8.8" height="15.0" fill="rgb(222,172,4)" rx="2" ry="2" />
+<text  x="476.58" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           232d1 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_erase+0x95 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (397,867,535 samples, 0.04%)</title><rect x="1078.7" y="277" width="0.5" height="15.0" fill="rgb(211,227,48)" rx="2" ry="2" />
+<text  x="1081.68" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bc4f std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0xf5 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (117,175,318 samples, 0.01%)</title><rect x="920.2" y="277" width="0.2" height="15.0" fill="rgb(224,41,8)" rx="2" ry="2" />
+<text  x="923.22" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           27098 std::__copy_move_backward_a2&lt;true, int*, int*&gt;+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (223,491,264 samples, 0.02%)</title><rect x="1109.7" y="277" width="0.3" height="15.0" fill="rgb(248,186,29)" rx="2" ry="2" />
+<text  x="1112.75" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1d63b std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int&gt;+0x10b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (633,358,618 samples, 0.07%)</title><rect x="996.8" y="277" width="0.8" height="15.0" fill="rgb(241,195,48)" rx="2" ry="2" />
+<text  x="999.80" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (177,000,000 samples, 0.02%)</title><rect x="1146.7" y="133" width="0.2" height="15.0" fill="rgb(209,123,22)" rx="2" ry="2" />
+<text  x="1149.69" y="143.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18404 Node&lt;int&gt;::SetKeyValue+0x46 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (89,681,549 samples, 0.01%)</title><rect x="792.7" y="277" width="0.1" height="15.0" fill="rgb(236,186,38)" rx="2" ry="2" />
+<text  x="795.69" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            f123 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::end+0x2b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (485,266,315 samples, 0.05%)</title><rect x="314.7" y="277" width="0.6" height="15.0" fill="rgb(243,191,47)" rx="2" ry="2" />
+<text  x="317.65" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d9af BPlusTree&lt;int&gt;::DeleteAll+0x157 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (15,762,792,679 samples, 1.74%)</title><rect x="251.5" y="277" width="20.5" height="15.0" fill="rgb(208,172,38)" rx="2" ry="2" />
+<text  x="254.46" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bf86 __gnu_cxx::__normal_iterator&lt;Node&lt;int&gt;**, std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;::operator++0x50 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (96,719,278 samples, 0.01%)</title><rect x="938.7" y="277" width="0.1" height="15.0" fill="rgb(246,219,2)" rx="2" ry="2" />
+<text  x="941.71" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           192dc std::vector&lt;int, std::allocator&lt;int&gt; &gt;::emplace_back&lt;int&gt;+0x96 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (633,359,370 samples, 0.07%)</title><rect x="872.6" y="277" width="0.8" height="15.0" fill="rgb(250,186,46)" rx="2" ry="2" />
+<text  x="875.56" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20fe9 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_realloc_insert&lt;Node&lt;int&gt;* const&amp;&gt;+0x145 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (258,313,883 samples, 0.03%)</title><rect x="1045.1" y="277" width="0.3" height="15.0" fill="rgb(215,81,13)" rx="2" ry="2" />
+<text  x="1048.07" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e83 BPlusTree&lt;int&gt;::SearchLeafNode+0x4b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (187,331,629 samples, 0.02%)</title><rect x="687.7" y="277" width="0.3" height="15.0" fill="rgb(223,203,42)" rx="2" ry="2" />
+<text  x="690.72" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (686,250,000 samples, 0.08%)</title><rect x="1187.8" y="181" width="0.9" height="15.0" fill="rgb(218,137,20)" rx="2" ry="2" />
+<text  x="1190.78" y="191.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           10df2 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::back+0x3e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (123,344,151 samples, 0.01%)</title><rect x="331.1" y="277" width="0.1" height="15.0" fill="rgb(226,85,39)" rx="2" ry="2" />
+<text  x="334.07" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24a5b std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_S_do_relocate+0x34 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,073,156,260 samples, 0.23%)</title><rect x="1090.1" y="277" width="2.7" height="15.0" fill="rgb(208,73,28)" rx="2" ry="2" />
+<text  x="1093.08" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bc7d std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x123 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (282,899,286 samples, 0.03%)</title><rect x="920.6" y="277" width="0.3" height="15.0" fill="rgb(214,190,19)" rx="2" ry="2" />
+<text  x="923.58" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15c85 BPlusTree&lt;int&gt;::Insert+0x15f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (308,470,150 samples, 0.03%)</title><rect x="594.2" y="277" width="0.4" height="15.0" fill="rgb(219,156,16)" rx="2" ry="2" />
+<text  x="597.18" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22f29 __gnu_cxx::__normal_iterator&lt;int const*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::__normal_iterator+0x17 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (97,910,799 samples, 0.01%)</title><rect x="1074.4" y="277" width="0.2" height="15.0" fill="rgb(235,184,41)" rx="2" ry="2" />
+<text  x="1077.43" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c9fe std::allocator_traits&lt;std::allocator&lt;int&gt; &gt;::deallocate+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (5,621,487,377 samples, 0.62%)</title><rect x="962.3" y="277" width="7.3" height="15.0" fill="rgb(236,211,39)" rx="2" ry="2" />
+<text  x="965.31" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           180f7 LeafNode&lt;int&gt;::Insert+0x13f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (226,363,928 samples, 0.02%)</title><rect x="770.0" y="277" width="0.3" height="15.0" fill="rgb(214,50,5)" rx="2" ry="2" />
+<text  x="772.97" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17eb5 BPlusTree&lt;int&gt;::SearchLeafNode+0x7d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (584,815,530 samples, 0.06%)</title><rect x="716.1" y="277" width="0.8" height="15.0" fill="rgb(236,44,45)" rx="2" ry="2" />
+<text  x="719.10" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20904 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0x40 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,150,803,196 samples, 0.24%)</title><rect x="1029.0" y="277" width="2.8" height="15.0" fill="rgb(233,121,46)" rx="2" ry="2" />
+<text  x="1032.01" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24eab std::__relocate_a&lt;int*, int*, std::allocator&lt;int&gt; &gt;+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (105,117,579 samples, 0.01%)</title><rect x="1097.9" y="277" width="0.2" height="15.0" fill="rgb(219,157,11)" rx="2" ry="2" />
+<text  x="1100.95" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bf1c std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::begin+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (259,751,892 samples, 0.03%)</title><rect x="937.8" y="277" width="0.3" height="15.0" fill="rgb(218,107,23)" rx="2" ry="2" />
+<text  x="940.78" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20245 std::allocator_traits&lt;std::allocator&lt;unsigned long&gt; &gt;::construct&lt;unsigned long, unsigned long const&amp;&gt;+0x3a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (481,443,724 samples, 0.05%)</title><rect x="1010.8" y="277" width="0.6" height="15.0" fill="rgb(223,139,40)" rx="2" ry="2" />
+<text  x="1013.80" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15bb4 BPlusTree&lt;int&gt;::Insert+0x8e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (19,415,433,428 samples, 2.14%)</title><rect x="553.2" y="277" width="25.3" height="15.0" fill="rgb(223,138,18)" rx="2" ry="2" />
+<text  x="556.24" y="287.5" >U..</text>
+</g>
+<g >
+<title>Unrecognized line: 	            cdcc operator new+0x0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (81,075,558 samples, 0.01%)</title><rect x="189.3" y="277" width="0.1" height="15.0" fill="rgb(245,1,26)" rx="2" ry="2" />
+<text  x="192.34" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           213c2 __gnu_cxx::new_allocator&lt;int&gt;::construct&lt;int, int&gt;+0x38 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (142,031,804 samples, 0.02%)</title><rect x="1050.4" y="277" width="0.2" height="15.0" fill="rgb(221,171,14)" rx="2" ry="2" />
+<text  x="1053.45" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bee7 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::~vector+0x45 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (760,901,616 samples, 0.08%)</title><rect x="936.6" y="277" width="1.0" height="15.0" fill="rgb(224,52,22)" rx="2" ry="2" />
+<text  x="939.59" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d98a BPlusTree&lt;int&gt;::DeleteAll+0x132 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (252,539,365 samples, 0.03%)</title><rect x="250.8" y="277" width="0.3" height="15.0" fill="rgb(222,204,26)" rx="2" ry="2" />
+<text  x="253.80" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22ef7 __gnu_cxx::new_allocator&lt;int&gt;::construct&lt;int, int const&amp;&gt;+0x27 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (119,942,288 samples, 0.01%)</title><rect x="1074.0" y="277" width="0.1" height="15.0" fill="rgb(216,88,51)" rx="2" ry="2" />
+<text  x="1076.99" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20c50 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::end+0x36 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (109,173,633 samples, 0.01%)</title><rect x="1041.0" y="277" width="0.2" height="15.0" fill="rgb(250,143,33)" rx="2" ry="2" />
+<text  x="1044.04" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e66c Node&lt;int&gt;::GetNodeType+0x0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (119,499,330 samples, 0.01%)</title><rect x="275.2" y="277" width="0.2" height="15.0" fill="rgb(245,87,3)" rx="2" ry="2" />
+<text  x="278.24" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e93 BPlusTree&lt;int&gt;::SearchLeafNode+0x5b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (535,992,746 samples, 0.06%)</title><rect x="688.6" y="277" width="0.6" height="15.0" fill="rgb(212,227,24)" rx="2" ry="2" />
+<text  x="691.55" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           211bf std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_erase+0x95 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (121,496,234 samples, 0.01%)</title><rect x="1047.8" y="277" width="0.1" height="15.0" fill="rgb(221,38,49)" rx="2" ry="2" />
+<text  x="1050.78" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           231fc std::_Vector_base&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_allocate+0x2e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (120,329,512 samples, 0.01%)</title><rect x="1077.2" y="277" width="0.2" height="15.0" fill="rgb(240,216,20)" rx="2" ry="2" />
+<text  x="1080.20" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15244 std::_Vector_base&lt;int, std::allocator&lt;int&gt; &gt;::_Vector_base+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (178,489,752 samples, 0.02%)</title><rect x="472.2" y="277" width="0.2" height="15.0" fill="rgb(238,34,8)" rx="2" ry="2" />
+<text  x="475.21" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20942 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0x7e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (223,277,395 samples, 0.02%)</title><rect x="1032.4" y="277" width="0.3" height="15.0" fill="rgb(208,188,32)" rx="2" ry="2" />
+<text  x="1035.39" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2011b __gnu_cxx::__normal_iterator&lt;unsigned long*, std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt; &gt;::__normal_iterator+0x17 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (335,793,213 samples, 0.04%)</title><rect x="1009.0" y="277" width="0.4" height="15.0" fill="rgb(234,118,35)" rx="2" ry="2" />
+<text  x="1011.98" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           188a3 BinALG&lt;int&gt;+0x52 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (93,621,184 samples, 0.01%)</title><rect x="841.9" y="277" width="0.1" height="15.0" fill="rgb(234,44,54)" rx="2" ry="2" />
+<text  x="844.92" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bbe5 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x8b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (170,088,308 samples, 0.02%)</title><rect x="919.5" y="277" width="0.2" height="15.0" fill="rgb(207,14,31)" rx="2" ry="2" />
+<text  x="922.47" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           261e7 std::allocator_traits&lt;std::allocator&lt;int&gt; &gt;::max_size+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (192,137,309 samples, 0.02%)</title><rect x="1107.6" y="277" width="0.3" height="15.0" fill="rgb(235,66,0)" rx="2" ry="2" />
+<text  x="1110.62" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17ecc BPlusTree&lt;int&gt;::SearchLeafNode+0x94 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (341,001,878 samples, 0.04%)</title><rect x="718.4" y="277" width="0.4" height="15.0" fill="rgb(210,44,31)" rx="2" ry="2" />
+<text  x="721.35" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           192f3 __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::__normal_iterator+0x5 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (79,000,564 samples, 0.01%)</title><rect x="874.1" y="277" width="0.1" height="15.0" fill="rgb(213,224,0)" rx="2" ry="2" />
+<text  x="877.07" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fc01 std::_Deque_iterator&lt;Node&lt;int&gt;*, Node&lt;int&gt;*&amp;, Node&lt;int&gt;**&gt;::_Deque_iterator+0x17 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (306,673,441 samples, 0.03%)</title><rect x="322.1" y="277" width="0.4" height="15.0" fill="rgb(208,31,20)" rx="2" ry="2" />
+<text  x="325.08" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,346,750,000 samples, 0.26%)</title><rect x="1112.9" y="85" width="3.1" height="15.0" fill="rgb(233,26,34)" rx="2" ry="2" />
+<text  x="1115.93" y="95.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           183a0 InterNode&lt;int&gt;::SetChild+0x84 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (4,740,270,724 samples, 0.52%)</title><rect x="786.4" y="277" width="6.2" height="15.0" fill="rgb(228,71,7)" rx="2" ry="2" />
+<text  x="789.42" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22c2a __gnu_cxx::new_allocator&lt;unsigned long&gt;::construct&lt;unsigned long, unsigned long const&amp;&gt;+0x3c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (212,970,656 samples, 0.02%)</title><rect x="1063.9" y="277" width="0.3" height="15.0" fill="rgb(219,39,46)" rx="2" ry="2" />
+<text  x="1066.90" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ca7d std::vector&lt;int, std::allocator&lt;int&gt; &gt;::erase+0x7b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (454,344,851 samples, 0.05%)</title><rect x="970.1" y="277" width="0.6" height="15.0" fill="rgb(244,9,34)" rx="2" ry="2" />
+<text  x="973.13" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1be92 std::_Vector_base&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::~_Vector_base+0x42 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (481,054,693 samples, 0.05%)</title><rect x="935.5" y="277" width="0.6" height="15.0" fill="rgb(229,209,51)" rx="2" ry="2" />
+<text  x="938.47" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           181b1 LeafNode&lt;int&gt;::Split+0x97 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (138,675,402 samples, 0.02%)</title><rect x="784.3" y="277" width="0.2" height="15.0" fill="rgb(242,74,39)" rx="2" ry="2" />
+<text  x="787.30" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20f0b std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_realloc_insert&lt;Node&lt;int&gt;* const&amp;&gt;+0x67 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (90,785,671 samples, 0.01%)</title><rect x="1043.5" y="277" width="0.1" height="15.0" fill="rgb(254,48,39)" rx="2" ry="2" />
+<text  x="1046.47" y="287.5" ></text>
+</g>
+<g >
+<title>__memmove_avx_unaligned_erms (610,750,000 samples, 0.07%)</title><rect x="1146.1" y="245" width="0.8" height="15.0" fill="rgb(233,3,42)" rx="2" ry="2" />
+<text  x="1149.12" y="255.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           115eb std::allocator_traits&lt;std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::deallocate+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (433,717,586 samples, 0.05%)</title><rect x="331.5" y="277" width="0.6" height="15.0" fill="rgb(225,100,3)" rx="2" ry="2" />
+<text  x="334.52" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c16a std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::insert+0x1a0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (105,936,820 samples, 0.01%)</title><rect x="941.2" y="277" width="0.1" height="15.0" fill="rgb(216,102,20)" rx="2" ry="2" />
+<text  x="944.17" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17de6 Node&lt;int&gt;::GetKeyValue+0x1e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (323,083,668 samples, 0.04%)</title><rect x="631.4" y="277" width="0.4" height="15.0" fill="rgb(247,194,29)" rx="2" ry="2" />
+<text  x="634.36" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18583 BPlusTree&lt;int&gt;::InsertInterNode+0xe7 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (456,346,318 samples, 0.05%)</title><rect x="814.0" y="277" width="0.6" height="15.0" fill="rgb(213,41,4)" rx="2" ry="2" />
+<text  x="817.03" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22b9c std::allocator_traits&lt;std::allocator&lt;unsigned long&gt; &gt;::deallocate+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (4,432,375,917 samples, 0.49%)</title><rect x="1057.2" y="277" width="5.8" height="15.0" fill="rgb(209,136,24)" rx="2" ry="2" />
+<text  x="1060.21" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d970 BPlusTree&lt;int&gt;::DeleteAll+0x118 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (3,352,222,915 samples, 0.37%)</title><rect x="246.2" y="277" width="4.3" height="15.0" fill="rgb(254,30,24)" rx="2" ry="2" />
+<text  x="249.19" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b864 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::begin+0x36 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (168,049,231 samples, 0.02%)</title><rect x="899.5" y="277" width="0.2" height="15.0" fill="rgb(224,18,22)" rx="2" ry="2" />
+<text  x="902.50" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2055f std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_realloc_insert&lt;unsigned long const&amp;&gt;+0x10b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,801,164,439 samples, 0.20%)</title><rect x="1020.3" y="277" width="2.3" height="15.0" fill="rgb(245,174,6)" rx="2" ry="2" />
+<text  x="1023.26" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1cced InterNode&lt;int&gt;::GetChild+0x5 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (106,421,489 samples, 0.01%)</title><rect x="970.8" y="277" width="0.1" height="15.0" fill="rgb(222,167,32)" rx="2" ry="2" />
+<text  x="973.80" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18264 LeafNode&lt;int&gt;::SetLeftBro+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (317,755,798 samples, 0.04%)</title><rect x="784.8" y="277" width="0.4" height="15.0" fill="rgb(222,147,39)" rx="2" ry="2" />
+<text  x="787.82" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2341c std::vector&lt;int, std::allocator&lt;int&gt; &gt;::max_size+0x24 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,107,800,394 samples, 0.12%)</title><rect x="1079.7" y="277" width="1.4" height="15.0" fill="rgb(253,222,8)" rx="2" ry="2" />
+<text  x="1082.67" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24a25 std::allocator_traits&lt;std::allocator&lt;unsigned long&gt; &gt;::allocate+0x2c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (281,427,598 samples, 0.03%)</title><rect x="1089.6" y="277" width="0.3" height="15.0" fill="rgb(206,79,12)" rx="2" ry="2" />
+<text  x="1092.56" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15d75 BPlusTree&lt;int&gt;::Insert+0x24f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (13,826,451,428 samples, 1.52%)</title><rect x="594.7" y="277" width="17.9" height="15.0" fill="rgb(216,127,29)" rx="2" ry="2" />
+<text  x="597.65" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           19378 __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::operator++0x2a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (94,890,176 samples, 0.01%)</title><rect x="876.4" y="277" width="0.2" height="15.0" fill="rgb(248,130,36)" rx="2" ry="2" />
+<text  x="879.43" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           206c9 std::allocator_traits&lt;std::allocator&lt;int&gt; &gt;::construct&lt;int, int const&amp;&gt;+0x3a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (432,384,310 samples, 0.05%)</title><rect x="1025.3" y="277" width="0.6" height="15.0" fill="rgb(230,177,54)" rx="2" ry="2" />
+<text  x="1028.33" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1847c Node&lt;int&gt;::SetFather+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (248,016,316 samples, 0.03%)</title><rect x="797.8" y="277" width="0.4" height="15.0" fill="rgb(236,67,46)" rx="2" ry="2" />
+<text  x="800.83" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b706 Node&lt;int&gt;::Node+0x2e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (261,877,944 samples, 0.03%)</title><rect x="883.7" y="277" width="0.3" height="15.0" fill="rgb(253,64,9)" rx="2" ry="2" />
+<text  x="886.67" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25e85 std::__relocate_a&lt;unsigned long*, unsigned long*, std::allocator&lt;unsigned long&gt; &gt;+0x5e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,616,131,869 samples, 0.18%)</title><rect x="1102.5" y="277" width="2.1" height="15.0" fill="rgb(219,88,1)" rx="2" ry="2" />
+<text  x="1105.48" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17eeb BPlusTree&lt;int&gt;::SearchLeafNode+0xb3 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (138,386,052 samples, 0.02%)</title><rect x="730.5" y="277" width="0.1" height="15.0" fill="rgb(251,187,39)" rx="2" ry="2" />
+<text  x="733.45" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2342e std::vector&lt;int, std::allocator&lt;int&gt; &gt;::size+0x10 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (94,412,470 samples, 0.01%)</title><rect x="1081.3" y="277" width="0.1" height="15.0" fill="rgb(215,95,8)" rx="2" ry="2" />
+<text  x="1084.30" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e668 std::queue&lt;Node&lt;int&gt;*, std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;::pop+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (735,741,707 samples, 0.08%)</title><rect x="274.3" y="277" width="0.9" height="15.0" fill="rgb(212,102,1)" rx="2" ry="2" />
+<text  x="277.25" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17f6e LeafNode&lt;int&gt;::LeafNode+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (289,814,494 samples, 0.03%)</title><rect x="731.5" y="277" width="0.4" height="15.0" fill="rgb(235,0,30)" rx="2" ry="2" />
+<text  x="734.48" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (684,250,000 samples, 0.08%)</title><rect x="1187.8" y="117" width="0.9" height="15.0" fill="rgb(217,9,46)" rx="2" ry="2" />
+<text  x="1190.79" y="127.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           185c0 BPlusTree&lt;int&gt;::InsertInterNode+0x124 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,195,377,004 samples, 0.13%)</title><rect x="814.6" y="277" width="1.6" height="15.0" fill="rgb(232,197,30)" rx="2" ry="2" />
+<text  x="817.63" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d0f8 BPlusTree&lt;int&gt;::~BPlusTree+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (31,589,250,559 samples, 3.48%)</title><rect x="190.7" y="277" width="41.0" height="15.0" fill="rgb(230,20,26)" rx="2" ry="2" />
+<text  x="193.68" y="287.5" >Unr..</text>
+</g>
+<g >
+<title>sysmalloc (691,000,000 samples, 0.08%)</title><rect x="1187.8" y="261" width="0.9" height="15.0" fill="rgb(238,105,22)" rx="2" ry="2" />
+<text  x="1190.78" y="271.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           2140f std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_check_len+0x43 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (223,762,617 samples, 0.02%)</title><rect x="1051.7" y="277" width="0.3" height="15.0" fill="rgb(222,185,0)" rx="2" ry="2" />
+<text  x="1054.70" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           23159 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_check_len+0xbd (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (225,967,666 samples, 0.02%)</title><rect x="1076.7" y="277" width="0.3" height="15.0" fill="rgb(236,134,16)" rx="2" ry="2" />
+<text  x="1079.74" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17eda BPlusTree&lt;int&gt;::SearchLeafNode+0xa2 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (8,396,955,230 samples, 0.93%)</title><rect x="719.0" y="277" width="10.9" height="15.0" fill="rgb(232,49,46)" rx="2" ry="2" />
+<text  x="721.98" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b9dd std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0xcf (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (87,078,083 samples, 0.01%)</title><rect x="902.5" y="277" width="0.1" height="15.0" fill="rgb(250,100,4)" rx="2" ry="2" />
+<text  x="905.52" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fe95 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::emplace_back&lt;Node&lt;int&gt;*&gt;+0x67 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (92,156,597 samples, 0.01%)</title><rect x="326.0" y="277" width="0.1" height="15.0" fill="rgb(246,52,6)" rx="2" ry="2" />
+<text  x="329.03" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24990 std::__copy_move_backward_a&lt;true, unsigned long*, unsigned long*&gt;+0x53 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (279,496,198 samples, 0.03%)</title><rect x="1087.4" y="277" width="0.3" height="15.0" fill="rgb(217,226,22)" rx="2" ry="2" />
+<text  x="1090.36" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (177,000,000 samples, 0.02%)</title><rect x="1146.7" y="117" width="0.2" height="15.0" fill="rgb(226,82,49)" rx="2" ry="2" />
+<text  x="1149.69" y="127.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,301,250,000 samples, 0.25%)</title><rect x="1113.0" y="69" width="3.0" height="15.0" fill="rgb(220,158,2)" rx="2" ry="2" />
+<text  x="1115.99" y="79.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            feb5 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::emplace_back&lt;Node&lt;int&gt;*&gt;+0x87 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (168,112,667 samples, 0.02%)</title><rect x="326.2" y="277" width="0.2" height="15.0" fill="rgb(228,93,34)" rx="2" ry="2" />
+<text  x="329.16" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (685,250,000 samples, 0.08%)</title><rect x="1187.8" y="149" width="0.9" height="15.0" fill="rgb(220,149,47)" rx="2" ry="2" />
+<text  x="1190.78" y="159.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,704,000,000 samples, 3.16%)</title><rect x="1149.1" y="85" width="37.4" height="15.0" fill="rgb(239,145,52)" rx="2" ry="2" />
+<text  x="1152.13" y="95.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e64 BPlusTree&lt;int&gt;::SearchLeafNode+0x2c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (113,472,912 samples, 0.01%)</title><rect x="661.8" y="277" width="0.1" height="15.0" fill="rgb(229,193,19)" rx="2" ry="2" />
+<text  x="664.75" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1d750 __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::base+0x0 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (140,496,215 samples, 0.02%)</title><rect x="998.1" y="277" width="0.2" height="15.0" fill="rgb(218,101,31)" rx="2" ry="2" />
+<text  x="1001.09" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           205c0 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_realloc_insert&lt;unsigned long const&amp;&gt;+0x16c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (392,450,697 samples, 0.04%)</title><rect x="1023.6" y="277" width="0.5" height="15.0" fill="rgb(232,150,43)" rx="2" ry="2" />
+<text  x="1026.58" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24910 __gnu_cxx::new_allocator&lt;unsigned long&gt;::construct&lt;unsigned long, unsigned long&gt;+0x28 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,643,442,874 samples, 0.18%)</title><rect x="1085.1" y="277" width="2.2" height="15.0" fill="rgb(231,144,53)" rx="2" ry="2" />
+<text  x="1088.13" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22f93 std::move_backward&lt;int*, int*&gt;+0x49 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (479,214,563 samples, 0.05%)</title><rect x="1074.8" y="277" width="0.6" height="15.0" fill="rgb(218,172,31)" rx="2" ry="2" />
+<text  x="1077.81" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1cd16 InterNode&lt;int&gt;::GetChild+0x2e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (9,474,593,608 samples, 1.04%)</title><rect x="973.7" y="277" width="12.3" height="15.0" fill="rgb(249,17,50)" rx="2" ry="2" />
+<text  x="976.73" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           17e8e BPlusTree&lt;int&gt;::SearchLeafNode+0x56 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (283,731,037 samples, 0.03%)</title><rect x="688.2" y="277" width="0.4" height="15.0" fill="rgb(225,114,48)" rx="2" ry="2" />
+<text  x="691.18" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            c48f main+0x366 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (106,185,868,433 samples, 11.70%)</title><rect x="10.2" y="277" width="138.1" height="15.0" fill="rgb(228,3,20)" rx="2" ry="2" />
+<text  x="13.22" y="287.5" >Unrecognized line..</text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (685,250,000 samples, 0.08%)</title><rect x="1187.8" y="133" width="0.9" height="15.0" fill="rgb(220,62,41)" rx="2" ry="2" />
+<text  x="1190.78" y="143.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            f252 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::front+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (637,913,811 samples, 0.07%)</title><rect x="315.9" y="277" width="0.8" height="15.0" fill="rgb(219,220,7)" rx="2" ry="2" />
+<text  x="318.91" y="287.5" ></text>
+</g>
+<g >
+<title>[unknown] (3,314,500,000 samples, 0.37%)</title><rect x="1112.2" y="261" width="4.3" height="15.0" fill="rgb(235,198,52)" rx="2" ry="2" />
+<text  x="1115.19" y="271.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,296,500,000 samples, 0.25%)</title><rect x="1113.0" y="37" width="3.0" height="15.0" fill="rgb(217,214,40)" rx="2" ry="2" />
+<text  x="1116.00" y="47.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           22d4f std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_check_len+0x43 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (180,565,896 samples, 0.02%)</title><rect x="1068.2" y="277" width="0.2" height="15.0" fill="rgb(249,194,49)" rx="2" ry="2" />
+<text  x="1071.17" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20526 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_realloc_insert&lt;unsigned long const&amp;&gt;+0xd2 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (298,569,120 samples, 0.03%)</title><rect x="1019.6" y="277" width="0.4" height="15.0" fill="rgb(210,81,21)" rx="2" ry="2" />
+<text  x="1022.62" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fc20 std::_Deque_iterator&lt;Node&lt;int&gt;*, Node&lt;int&gt;*&amp;, Node&lt;int&gt;**&gt;::_Deque_iterator+0x36 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (106,763,195 samples, 0.01%)</title><rect x="322.8" y="277" width="0.1" height="15.0" fill="rgb(206,228,26)" rx="2" ry="2" />
+<text  x="325.76" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25d16 std::__copy_move_backward_a1&lt;true, unsigned long*, unsigned long*&gt;+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (258,066,138 samples, 0.03%)</title><rect x="1100.3" y="277" width="0.3" height="15.0" fill="rgb(229,214,47)" rx="2" ry="2" />
+<text  x="1103.28" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,359,000,000 samples, 0.26%)</title><rect x="1112.9" y="165" width="3.1" height="15.0" fill="rgb(221,183,53)" rx="2" ry="2" />
+<text  x="1115.92" y="175.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           16471 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::begin+0x23 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (118,423,089 samples, 0.01%)</title><rect x="624.3" y="277" width="0.1" height="15.0" fill="rgb(229,208,36)" rx="2" ry="2" />
+<text  x="627.29" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (177,500,000 samples, 0.02%)</title><rect x="1146.7" y="165" width="0.2" height="15.0" fill="rgb(216,75,43)" rx="2" ry="2" />
+<text  x="1149.68" y="175.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           200c0 std::_Vector_base&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_deallocate+0x36 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (4,612,611,343 samples, 0.51%)</title><rect x="1002.0" y="277" width="6.0" height="15.0" fill="rgb(248,154,21)" rx="2" ry="2" />
+<text  x="1005.03" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c0ed std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::insert+0x123 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (135,783,851 samples, 0.01%)</title><rect x="939.9" y="277" width="0.2" height="15.0" fill="rgb(214,34,27)" rx="2" ry="2" />
+<text  x="942.95" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (689,500,000 samples, 0.08%)</title><rect x="1187.8" y="213" width="0.9" height="15.0" fill="rgb(247,43,51)" rx="2" ry="2" />
+<text  x="1190.78" y="223.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c841 InterNode&lt;int&gt;::Split+0x563 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (891,922,182 samples, 0.10%)</title><rect x="959.9" y="277" width="1.2" height="15.0" fill="rgb(231,197,21)" rx="2" ry="2" />
+<text  x="962.92" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            f0f1 std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::begin+0x2b (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (485,181,087 samples, 0.05%)</title><rect x="313.8" y="277" width="0.7" height="15.0" fill="rgb(217,97,4)" rx="2" ry="2" />
+<text  x="316.84" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           180d0 LeafNode&lt;int&gt;::Insert+0x118 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (225,008,605 samples, 0.02%)</title><rect x="756.6" y="277" width="0.3" height="15.0" fill="rgb(225,52,15)" rx="2" ry="2" />
+<text  x="759.64" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,364,750,000 samples, 0.26%)</title><rect x="1112.9" y="229" width="3.1" height="15.0" fill="rgb(252,132,33)" rx="2" ry="2" />
+<text  x="1115.91" y="239.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1cd52 InterNode&lt;int&gt;::~InterNode+0x3a (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (2,743,811,132 samples, 0.30%)</title><rect x="987.5" y="277" width="3.5" height="15.0" fill="rgb(235,150,52)" rx="2" ry="2" />
+<text  x="990.48" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           18782 Node&lt;int&gt;::~Node+0x2e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (7,467,601,474 samples, 0.82%)</title><rect x="823.5" y="277" width="9.7" height="15.0" fill="rgb(254,113,15)" rx="2" ry="2" />
+<text  x="826.54" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25ecf std::__copy_move_backward_a1&lt;true, int*, int*&gt;+0x2f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (273,003,175 samples, 0.03%)</title><rect x="1105.1" y="277" width="0.3" height="15.0" fill="rgb(227,30,41)" rx="2" ry="2" />
+<text  x="1108.06" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bcc1 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x167 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (231,979,008 samples, 0.03%)</title><rect x="922.7" y="277" width="0.3" height="15.0" fill="rgb(250,64,41)" rx="2" ry="2" />
+<text  x="925.71" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           15264 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::vector+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (213,108,172 samples, 0.02%)</title><rect x="472.5" y="277" width="0.3" height="15.0" fill="rgb(217,225,39)" rx="2" ry="2" />
+<text  x="475.48" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1ccf8 InterNode&lt;int&gt;::GetChild+0x10 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (81,478,135 samples, 0.01%)</title><rect x="971.0" y="277" width="0.1" height="15.0" fill="rgb(241,190,43)" rx="2" ry="2" />
+<text  x="974.01" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bba9 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x4f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (101,566,716 samples, 0.01%)</title><rect x="919.0" y="277" width="0.1" height="15.0" fill="rgb(218,123,22)" rx="2" ry="2" />
+<text  x="922.00" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c6f3 InterNode&lt;int&gt;::Split+0x415 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (123,488,300 samples, 0.01%)</title><rect x="958.0" y="277" width="0.1" height="15.0" fill="rgb(205,207,18)" rx="2" ry="2" />
+<text  x="960.97" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           139d0 Tree+0x64c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,626,900,277 samples, 0.18%)</title><rect x="346.2" y="277" width="2.1" height="15.0" fill="rgb(253,165,3)" rx="2" ry="2" />
+<text  x="349.16" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fc38 std::_Deque_iterator&lt;Node&lt;int&gt;*, Node&lt;int&gt;*&amp;, Node&lt;int&gt;**&gt;::_Deque_iterator+0x4e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (84,506,653 samples, 0.01%)</title><rect x="323.1" y="277" width="0.1" height="15.0" fill="rgb(212,115,14)" rx="2" ry="2" />
+<text  x="326.10" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            e62c std::queue&lt;Node&lt;int&gt;*, std::deque&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;::empty+0x1c (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (232,100,433 samples, 0.03%)</title><rect x="272.6" y="277" width="0.3" height="15.0" fill="rgb(217,123,2)" rx="2" ry="2" />
+<text  x="275.60" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           204e9 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_M_realloc_insert&lt;unsigned long const&amp;&gt;+0x95 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (468,098,125 samples, 0.05%)</title><rect x="1018.8" y="277" width="0.6" height="15.0" fill="rgb(228,93,18)" rx="2" ry="2" />
+<text  x="1021.82" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (28,787,750,000 samples, 3.17%)</title><rect x="1149.0" y="181" width="37.5" height="15.0" fill="rgb(224,3,33)" rx="2" ry="2" />
+<text  x="1152.02" y="191.5" >[[k..</text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b860 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::begin+0x32 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (476,559,756 samples, 0.05%)</title><rect x="898.9" y="277" width="0.6" height="15.0" fill="rgb(214,10,29)" rx="2" ry="2" />
+<text  x="901.88" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20bb6 __gnu_cxx::__normal_iterator&lt;Node&lt;int&gt;**, std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt; &gt;::__normal_iterator+0x14 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (83,159,068 samples, 0.01%)</title><rect x="1040.0" y="277" width="0.1" height="15.0" fill="rgb(239,70,41)" rx="2" ry="2" />
+<text  x="1042.97" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bbce std::vector&lt;int, std::allocator&lt;int&gt; &gt;::insert+0x74 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (139,802,436 samples, 0.02%)</title><rect x="919.3" y="277" width="0.1" height="15.0" fill="rgb(206,31,4)" rx="2" ry="2" />
+<text  x="922.25" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           24dd1 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_S_max_size+0x50 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (224,973,079 samples, 0.02%)</title><rect x="1096.9" y="277" width="0.3" height="15.0" fill="rgb(219,119,21)" rx="2" ry="2" />
+<text  x="1099.87" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25d67 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_S_max_size+0x39 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (305,252,182 samples, 0.03%)</title><rect x="1100.8" y="277" width="0.4" height="15.0" fill="rgb(253,82,18)" rx="2" ry="2" />
+<text  x="1103.81" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c8e6 InterNode&lt;int&gt;::Split+0x608 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (199,118,496 samples, 0.02%)</title><rect x="961.3" y="277" width="0.3" height="15.0" fill="rgb(221,86,36)" rx="2" ry="2" />
+<text  x="964.32" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c148 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::insert+0x17e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (95,749,843 samples, 0.01%)</title><rect x="940.9" y="277" width="0.1" height="15.0" fill="rgb(236,102,34)" rx="2" ry="2" />
+<text  x="943.88" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           19305 __gnu_cxx::__normal_iterator&lt;int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;::__normal_iterator+0x17 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (600,859,168 samples, 0.07%)</title><rect x="874.6" y="277" width="0.7" height="15.0" fill="rgb(217,219,39)" rx="2" ry="2" />
+<text  x="877.57" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20631 __gnu_cxx::operator-&lt;int const*, int*, std::vector&lt;int, std::allocator&lt;int&gt; &gt; &gt;+0x24 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (98,934,607 samples, 0.01%)</title><rect x="1024.5" y="277" width="0.2" height="15.0" fill="rgb(210,54,43)" rx="2" ry="2" />
+<text  x="1027.55" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            d8fe BPlusTree&lt;int&gt;::DeleteAll+0xa6 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (998,173,499 samples, 0.11%)</title><rect x="231.8" y="277" width="1.3" height="15.0" fill="rgb(247,178,48)" rx="2" ry="2" />
+<text  x="234.78" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1804b LeafNode&lt;int&gt;::Insert+0x93 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (276,233,584 samples, 0.03%)</title><rect x="737.4" y="277" width="0.4" height="15.0" fill="rgb(232,36,11)" rx="2" ry="2" />
+<text  x="740.42" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20f76 std::vector&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::_M_realloc_insert&lt;Node&lt;int&gt;* const&amp;&gt;+0xd2 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (122,618,535 samples, 0.01%)</title><rect x="1044.1" y="277" width="0.1" height="15.0" fill="rgb(222,51,36)" rx="2" ry="2" />
+<text  x="1047.08" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1be9e std::_Vector_base&lt;Node&lt;int&gt;*, std::allocator&lt;Node&lt;int&gt;*&gt; &gt;::~_Vector_base+0x4e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (122,943,984 samples, 0.01%)</title><rect x="936.1" y="277" width="0.2" height="15.0" fill="rgb(236,121,35)" rx="2" ry="2" />
+<text  x="939.12" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           25d6b std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::_S_max_size+0x3d (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (111,899,165 samples, 0.01%)</title><rect x="1101.2" y="277" width="0.2" height="15.0" fill="rgb(241,82,52)" rx="2" ry="2" />
+<text  x="1104.21" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (182,000,000 samples, 0.02%)</title><rect x="1146.7" y="213" width="0.2" height="15.0" fill="rgb(245,81,8)" rx="2" ry="2" />
+<text  x="1149.68" y="223.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           209d8 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0x114 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (122,322,591 samples, 0.01%)</title><rect x="1035.7" y="277" width="0.2" height="15.0" fill="rgb(252,131,47)" rx="2" ry="2" />
+<text  x="1038.70" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           20996 std::vector&lt;int, std::allocator&lt;int&gt; &gt;::_M_realloc_insert&lt;int const&amp;&gt;+0xd2 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (480,542,768 samples, 0.05%)</title><rect x="1033.7" y="277" width="0.6" height="15.0" fill="rgb(205,47,34)" rx="2" ry="2" />
+<text  x="1036.70" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	            fc08 std::_Deque_iterator&lt;Node&lt;int&gt;*, Node&lt;int&gt;*&amp;, Node&lt;int&gt;**&gt;::_Deque_iterator+0x1e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (92,852,583 samples, 0.01%)</title><rect x="322.5" y="277" width="0.1" height="15.0" fill="rgb(207,224,16)" rx="2" ry="2" />
+<text  x="325.48" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1c93d InterNode&lt;int&gt;::Split+0x65f (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (208,951,515 samples, 0.02%)</title><rect x="961.7" y="277" width="0.3" height="15.0" fill="rgb(241,97,1)" rx="2" ry="2" />
+<text  x="964.68" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1bac4 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::insert+0x1b6 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (7,049,233,328 samples, 0.78%)</title><rect x="907.8" y="277" width="9.2" height="15.0" fill="rgb(220,98,4)" rx="2" ry="2" />
+<text  x="910.80" y="287.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (2,356,250,000 samples, 0.26%)</title><rect x="1112.9" y="133" width="3.1" height="15.0" fill="rgb(249,221,54)" rx="2" ry="2" />
+<text  x="1115.92" y="143.5" ></text>
+</g>
+<g >
+<title>[[kernel.kallsyms]] (689,500,000 samples, 0.08%)</title><rect x="1187.8" y="245" width="0.9" height="15.0" fill="rgb(232,76,34)" rx="2" ry="2" />
+<text  x="1190.78" y="255.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1cd46 InterNode&lt;int&gt;::~InterNode+0x2e (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (1,041,280,412 samples, 0.11%)</title><rect x="986.1" y="277" width="1.4" height="15.0" fill="rgb(238,36,40)" rx="2" ry="2" />
+<text  x="989.11" y="287.5" ></text>
+</g>
+<g >
+<title>Unrecognized line: 	           1b7f1 std::vector&lt;unsigned long, std::allocator&lt;unsigned long&gt; &gt;::~vector+0x27 (/home/why/vs work/develop/BPlusTree/build/src/main) at ./stackcollapse-perf.pl line 429, &lt;&gt; line (316,544,447 samples, 0.03%)</title><rect x="891.0" y="277" width="0.4" height="15.0" fill="rgb(216,118,12)" rx="2" ry="2" />
+<text  x="894.04" y="287.5" ></text>
+</g>
+</g>
+</svg>

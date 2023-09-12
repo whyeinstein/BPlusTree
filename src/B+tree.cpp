@@ -1,7 +1,7 @@
-
-
-#include <boost/archive/text_iarchive.hpp>
-#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/binary_iarchive.hpp>
+#include <boost/archive/binary_oarchive.hpp>
+// #include <boost/archive/text_iarchive.hpp>
+// #include <boost/archive/text_oarchive.hpp>
 #include <boost/serialization/export.hpp>
 #include <cstdint>
 #include <string>
@@ -20,10 +20,10 @@ void SaveTest(BPlusTree<int>* saveTree) {
   std::cout << "请输入文件名" << std::endl;
   std::string treeFileName;
   std::cin >> treeFileName;
-  treeFileName = treeFileName + ".txt";
-  std::ofstream fout(treeFileName, std::ios::app);
+  treeFileName = treeFileName + ".bin";
+  std::ofstream fout(treeFileName, std::ios::binary | std::ios::app);
   if (fout.is_open()) {
-    boost::archive::text_oarchive oa(fout);
+    boost::archive::binary_oarchive oa(fout);
     oa << saveTree;
     fout.close();
   } else {
@@ -37,7 +37,7 @@ void Load() {  // 打开序列化文件
   std::string openFile;
   std::cout << "请输入文件名" << std::endl;
   std::cin >> openFile;
-  openFile = openFile + ".txt";
+  openFile = openFile + ".bin";
   std::ifstream ifs(openFile);
 
   // 检查文件是否打开成功
@@ -47,7 +47,7 @@ void Load() {  // 打开序列化文件
   }
 
   // 创建一个反序列化对象
-  boost::archive::text_iarchive ia(ifs);
+  boost::archive::binary_iarchive ia(ifs);
 
   // 反序列化对象
   ia >> load;
@@ -224,7 +224,7 @@ void TreeS(BPlusTree<std::string>* sx) {
     }
 
     switch (choice) {
-      case -1:
+      case 1:
         std::cout << "输入键值对,（,-1）退出" << std::endl;
         std::cin >> skey;
         std::cin >> iValue;
@@ -254,7 +254,7 @@ void TreeS(BPlusTree<std::string>* sx) {
           } else {
             std::cout << "未找到，删除失败！" << std::endl;
           }
-          std::cout << "请输入要删除的key(0退出)" << std::endl;
+          std::cout << "请输入要删除的key(exit退出)" << std::endl;
           std::cin >> delKey;
         }
         break;

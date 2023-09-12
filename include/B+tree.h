@@ -274,8 +274,8 @@ bool InterNode<T>::Insert(T key, Node<T>* pNode) {
 
 /* 分裂中间结点
 分裂中间结点和分裂叶子结点完全不同，因为中间结点不仅有2V键，还有2V+1指针，如果单纯地一分为2，指针将无法分
-配。 因此根据http://www.seanster.com/BplusTree/BplusTree.html ，分裂中
-间结点的算法是： 根据要插入的键key判断：
+配。 分裂中间结点的算法是：
+根据要插入的键key判断：
 (1)如果key小于第V个键，则把第V个键提出来,其左右的键分别分到两个结点中
 (2) 如果key大于第V+1个键，则把第V+1个键提出来,其左右的键分别分到两个结点中
 (3)如果key介于第V和V+1个键之间，则把key作为
@@ -296,11 +296,7 @@ T InterNode<T>::Split(InterNode<T>* pNode, T key, int MAX_KEYNUM, int ORDER,
     for (x = ORDER, i = ORDER; i < MAX_KEYNUM; i++) {
       //用m找到在当前节点应该插入的位置,x保存删除位置
       int m = BinALG(pNode, pNode->GetCount(), this->GetKeyValue(i));
-      // for (mm = 0; (mm < (pNode->GetCount())) &&
-      //              (this->GetKeyValue(i) > pNode->GetKeyValue(mm));
-      //      mm++)
-      //   ;
-      // std::cout << "xxx" << mm - m << std::endl;
+
       //插入
       pNode->SetKeyValue(m, this->GetKeyValue(x));
       pNode->SetChild(m, this->GetChild(x + 1));

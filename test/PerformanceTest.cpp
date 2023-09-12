@@ -23,13 +23,9 @@ class InsertPerformance : public ::testing::Test {
 };
 
 TEST_F(InsertPerformance, insertPerformanceTest) {
-  // char buf[100];
-
   std::string s1, s2, s;
   clock_t start;
   clock_t end;
-
-  // int fd = open("performance.txt", O_RDWR | O_APPEND);
 
   double pTime1 = 0, pTime2 = 0;
 
@@ -38,7 +34,7 @@ TEST_F(InsertPerformance, insertPerformanceTest) {
     treeTwo->SetMinKey(j / 2);
 
     start = clock();
-    for (int i = 1; i <= 10000; i++) {
+    for (int i = 1; i <= 1000000; i++) {
       treeTwo->Insert(i, i);
     }
     end = clock();
@@ -50,17 +46,6 @@ TEST_F(InsertPerformance, insertPerformanceTest) {
     end = clock();
     pTime2 = double(end - start) / CLOCKS_PER_SEC;
     std::cout << "删除花费时间：" << pTime2 << std::endl;
-
-    // memset(buf, 0, sizeof(buf));
-
-    // std::stringstream ss;
-    // ss << pTime1;close
-    // ss >> s1;
-    // ss << pTime2;
-    // ss >> s2;
-    // s = "度数:" + std::to_string(j) + "  insert:" + s1 + "  delete:" + s2;
-    // strcpy(buf, s.c_str());
-    // write(fd, buf, strlen(buf));
 
     std::cout << std::endl;
   }

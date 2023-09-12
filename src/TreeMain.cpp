@@ -25,7 +25,19 @@ int main() {
               << std::endl;
 
     std::cin >> exit;
+
+    //清空
     if (exit == 0) {
+      while (forest.size() != 0) {
+        BPlusTree<int> *dx = forest[0];
+        delete dx;
+        forest.erase(forest.begin());
+      }
+      while (sforest.size() != 0) {
+        BPlusTree<std::string> *dsx = sforest[0];
+        delete dsx;
+        sforest.erase(sforest.begin());
+      }
       break;
     }
     BPlusTree<int> *x = new BPlusTree<int>;
@@ -109,6 +121,8 @@ int main() {
         }
         break;
       case 7:
+        delete x;
+        delete sx;
         Load();
         break;
       default:
