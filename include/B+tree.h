@@ -227,6 +227,7 @@ void Load();
 void thread_entry();
 void Tree(BPlusTree<int>* x);
 void TreeS(BPlusTree<std::string>* sx);
+void compare();
 
 /*-------------------------Node函数定义---------------------------*/
 template <typename T>

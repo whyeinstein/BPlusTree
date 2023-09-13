@@ -125,6 +125,11 @@ int main() {
         delete sx;
         Load();
         break;
+      case 8:
+        delete x;
+        delete sx;
+        compare();
+        break;
       default:
         break;
     }
