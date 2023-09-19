@@ -1,7 +1,22 @@
 
 #include <gtest/gtest.h>
 
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/serialization/export.hpp>
+#include <fstream>
+
 #include "../include/B+tree.h"
+
+BOOST_CLASS_EXPORT(Node<int>);
+BOOST_CLASS_EXPORT(BPlusTree<int>);
+BOOST_CLASS_EXPORT(LeafNode<int>);
+BOOST_CLASS_EXPORT(InterNode<int>);
+
+BOOST_CLASS_EXPORT(Node<std::string>);
+BOOST_CLASS_EXPORT(LeafNode<std::string>);
+BOOST_CLASS_EXPORT(BPlusTree<std::string>);
+BOOST_CLASS_EXPORT(InterNode<std::string>);
 
 class InsAndDelTest : public ::testing::Test {
  public:
@@ -130,4 +145,34 @@ TEST_F(InsAndDelTest, deleteTest) {
   treeOne->Delete(555);
   ans = {};
   ASSERT_EQ(treeOne->LevelTraversal(), ans) << "delete to null tree";
+};
+
+class SerializeTest : public ::testing::Test {
+ public:
+  BPlusTree<int> *treeLoad;
+  BPlusTree<int> *treeSave = new BPlusTree<int>;
+  std::vector<int> ans{10, 4, 7,  13, 16, 19, 1,  2,  3,  4,  5,  6,  7,
+                       8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20};
+  void SetUp() override {
+    treeSave->SetMaxKey(4);
+    treeSave->SetMinKey(2);
+
+    for (int i = 1; i <= 20; i++) {
+      treeSave->Insert(i, i);
+    }
+  }
+  void TearDown() override { delete treeSave; }
+};
+
+TEST_F(SerializeTest, saveTest) {
+  ASSERT_EQ(treeSave->LevelTraversal(), ans) << "before serialize";
+  std::ofstream fout("test.txt", std::ios::trunc);
+  boost::archive::text_oarchive oa(fout);
+  oa << treeSave;
+  fout.close();
+
+  std::ifstream ifs("test.txt");
+  boost::archive::text_iarchive ia(ifs);
+  ia >> treeLoad;
+  ASSERT_EQ(treeLoad->LevelTraversal(), ans) << "after serialize";
 };

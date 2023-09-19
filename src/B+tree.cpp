@@ -1,29 +1,35 @@
-#include <boost/archive/binary_iarchive.hpp>
-#include <boost/archive/binary_oarchive.hpp>
-// #include <boost/archive/text_iarchive.hpp>
-// #include <boost/archive/text_oarchive.hpp>
+// #include <boost/archive/binary_iarchive.hpp>
+// #include <boost/archive/binary_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/archive/text_oarchive.hpp>
 #include <boost/serialization/export.hpp>
 #include <cstdint>
 #include <string>
 
 #include "B+tree.h"
 
-// BOOST_CLASS_EXPORT_GUID(InterNode<int>, "InterNode_int");
-// BOOST_CLASS_EXPORT_GUID(LeafNode<int>, "LeafNode_int");
-BOOST_CLASS_EXPORT(LeafNode<int>);
+BOOST_CLASS_EXPORT(Node<int>);
 BOOST_CLASS_EXPORT(BPlusTree<int>);
+BOOST_CLASS_EXPORT(LeafNode<int>);
 BOOST_CLASS_EXPORT(InterNode<int>);
-extern std::vector<BPlusTree<int>*> forest;
 
-//序列化与反序列化
-void SaveTest(BPlusTree<int>* saveTree) {
-  std::cout << "请输入文件名" << std::endl;
+BOOST_CLASS_EXPORT(Node<std::string>);
+BOOST_CLASS_EXPORT(LeafNode<std::string>);
+BOOST_CLASS_EXPORT(BPlusTree<std::string>);
+BOOST_CLASS_EXPORT(InterNode<std::string>);
+
+extern std::vector<BPlusTree<int>*> forest;
+extern std::vector<BPlusTree<std::string>*> sforest;
+
+//序列化int
+void Save(BPlusTree<int>* saveTree) {
   std::string treeFileName;
+  std::cout << "请输入文件名" << std::endl;
   std::cin >> treeFileName;
-  treeFileName = treeFileName + ".bin";
-  std::ofstream fout(treeFileName, std::ios::binary | std::ios::app);
+  treeFileName = treeFileName + ".txt";
+  std::ofstream fout(treeFileName, std::ios::app);
   if (fout.is_open()) {
-    boost::archive::binary_oarchive oa(fout);
+    boost::archive::text_oarchive oa(fout);
     oa << saveTree;
     fout.close();
   } else {
@@ -32,30 +38,55 @@ void SaveTest(BPlusTree<int>* saveTree) {
   }
 }
 
-void Load() {  // 打开序列化文件
-  BPlusTree<int>* load;
+// //序列化string
+void Save(BPlusTree<std::string>* saveTree) {
+  std::cout << "请输入文件名" << std::endl;
+  std::string treeFileName;
+  std::cin >> treeFileName;
+  treeFileName = treeFileName + ".txt";
+  std::ofstream fout(treeFileName, std::ios::app);
+  if (fout.is_open()) {
+    boost::archive::text_oarchive oa(fout);
+    oa << saveTree;
+    fout.close();
+  } else {
+    std::cout << "open file failed." << std::endl;
+    exit(-1);
+  }
+}
+
+//反序列化(flag=1代表int，flag=2代表string)
+void Load(int flag) {
+  BPlusTree<int>* loadInt;
+  BPlusTree<std::string>* loadString;
   std::string openFile;
+
   std::cout << "请输入文件名" << std::endl;
   std::cin >> openFile;
-  openFile = openFile + ".bin";
-  std::ifstream ifs(openFile);
 
-  // 检查文件是否打开成功
+  openFile = openFile + ".txt";
+  std::ifstream ifs(openFile);
   if (!ifs.is_open()) {
     std::cerr << "Failed to open file for deserialization." << std::endl;
     return;
   }
 
-  // 创建一个反序列化对象
-  boost::archive::binary_iarchive ia(ifs);
-
   // 反序列化对象
-  ia >> load;
+  boost::archive::text_iarchive ia(ifs);
+  if (flag == 1) {
+    ia >> loadInt;
+    loadInt->LevelTraversal();
+    forest.push_back(loadInt);
+    std::cout << "反序列化成功" << std::endl;
+    std::cout << "树" << forest.size() << "（int）创建" << std::endl;
+  } else if (flag == 2) {
+    ia >> loadString;
+    loadString->LevelTraversal();
+    sforest.push_back(loadString);
+    std::cout << "反序列化成功" << std::endl;
+    std::cout << "树" << sforest.size() << "（string）创建" << std::endl;
+  }
 
-  load->LevelTraversal();
-  forest.push_back(load);
-  std::cout << "反序列化成功" << std::endl;
-  std::cout << "树" << forest.size() << "（int）创建" << std::endl;
   // 关闭文件
   ifs.close();
 }
@@ -95,7 +126,6 @@ void thread_entry() {
     std::cout << std::endl;
   }
   ofs.close();
-  // pthread_exit(NULL);
 }
 
 void Tree(BPlusTree<int>* x) {
@@ -192,7 +222,7 @@ void Tree(BPlusTree<int>* x) {
         }
         break;
       case 8:
-        SaveTest(x);
+        Save(x);
         break;
 
       //性能测试
@@ -270,9 +300,8 @@ void TreeS(BPlusTree<std::string>* sx) {
                   << std::endl;
         break;
       case 6:
-        // SaveTest();
+        Save(sx);
         break;
-
       default:
         break;
     }

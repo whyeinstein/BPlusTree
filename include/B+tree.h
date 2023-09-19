@@ -78,7 +78,7 @@ class InterNode : public Node<T> {
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version) {
-    ar& boost::serialization::base_object<Node<int>>(*this);
+    ar& boost::serialization::base_object<Node<T>>(*this);
     ar& m_Childs;
   }
 
@@ -120,7 +120,7 @@ class LeafNode : public Node<T> {
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version) {
-    ar& boost::serialization::base_object<Node<int>>(*this);
+    ar& boost::serialization::base_object<Node<T>>(*this);
     ar& m_RightBro;
     ar& m_LeftBro;
     ar& m_Values;
@@ -162,6 +162,8 @@ template <typename foo>
 class BPlusTree {
  private:
   friend class boost::serialization::access;
+  friend void Save(BPlusTree<int>*);
+  friend void Save(BPlusTree<std::string>*);
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version) {
@@ -222,14 +224,16 @@ class BPlusTree {
   int ORDER;                  //最小数目
 };
 
-void SaveTest();
-void Load();
+void Save(BPlusTree<int>* saveTree);
+void Save(BPlusTree<std::string>* saveTree);
+void Load(int flag);
 void thread_entry();
 void Tree(BPlusTree<int>* x);
 void TreeS(BPlusTree<std::string>* sx);
 void compare();
 
 /*-------------------------Node函数定义---------------------------*/
+
 template <typename T>
 Node<T>::Node() {
   m_Count = 0;
@@ -296,7 +300,7 @@ T InterNode<T>::Split(InterNode<T>* pNode, T key, int MAX_KEYNUM, int ORDER,
     int x;
     for (x = ORDER, i = ORDER; i < MAX_KEYNUM; i++) {
       //用m找到在当前节点应该插入的位置,x保存删除位置
-      int m = BinALG(pNode, pNode->GetCount(), this->GetKeyValue(i));
+      int m = BinALG(pNode, pNode->GetCount(), this->GetKeyValue(x));
 
       //插入
       pNode->SetKeyValue(m, this->GetKeyValue(x));

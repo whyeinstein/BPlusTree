@@ -21,7 +21,8 @@ int main() {
 
     std::cout << "输入0退出，输入1创建树（int），输入2创建树（string），输入3操"
                  "作树（int），输入4操作树（string）,"
-                 "输入5删除树（int），输入6删除树（string）,7反序列化"
+                 "\n输入5删除树（int），输入6删除树（string）,7反序列化(int),"
+                 "8反序列化(string),9与STX B+Tree比较"
               << std::endl;
 
     std::cin >> exit;
@@ -86,7 +87,7 @@ int main() {
           std::cout << "没有这棵树" << std::endl;
         } else {
           sx = sforest[degree - 1];
-          std::cout << "树" << forest.size() << "（string）操作" << std::endl;
+          std::cout << "树" << sforest.size() << "（string）操作" << std::endl;
           TreeS(sx);
         }
         break;
@@ -123,9 +124,14 @@ int main() {
       case 7:
         delete x;
         delete sx;
-        Load();
+        Load(1);
         break;
       case 8:
+        delete x;
+        delete sx;
+        Load(2);
+        break;
+      case 9:
         delete x;
         delete sx;
         compare();

@@ -29,12 +29,12 @@ TEST_F(InsertPerformance, insertPerformanceTest) {
 
   double pTime1 = 0, pTime2 = 0;
 
-  for (int j = 3; j <= 100; j++) {
+  for (int j = 3; j <= 3; j++) {
     treeTwo->SetMaxKey(j - 1);
     treeTwo->SetMinKey(j / 2);
 
     start = clock();
-    for (int i = 1; i <= 1000000; i++) {
+    for (int i = 1; i <= 10000000; i++) {
       treeTwo->Insert(i, i);
     }
     end = clock();
