@@ -9,8 +9,10 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <ostream>
 #include <queue>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -19,7 +21,6 @@ template <typename T>
 class Node {
  private:
   friend class boost::serialization::access;
-
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version) {
     ar& m_Count;
@@ -29,6 +30,7 @@ class Node {
   }
 
  public:
+  std::shared_mutex nodeMutex;
   Node();
   virtual ~Node(){};  // virtual ???
 
@@ -216,7 +218,7 @@ class BPlusTree {
   void SetMinKey(int i) { ORDER = i; }
   int GetMinKey() { return ORDER; }
 
- public:
+ private:
   LeafNode<foo>* m_LeafHead;  //叶子节点链表表头
   LeafNode<foo>* m_LeafTail;  //叶子节点链表表尾
   Node<foo>* m_Root;          //根节点
@@ -224,6 +226,7 @@ class BPlusTree {
   int ORDER;                  //最小数目
 };
 
+/*-------------------------函数声明---------------------------*/
 void Save(BPlusTree<int>* saveTree);
 void Save(BPlusTree<std::string>* saveTree);
 void Load(int flag);

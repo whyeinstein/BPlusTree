@@ -11,20 +11,19 @@
 
 
 add_library(bplustree STATIC B+tree.cpp)
-
 target_include_directories(bplustree PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 add_executable(main TreeMain.cpp)
-
 target_link_libraries(main PRIVATE bplustree)
-
 target_include_directories(main PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 add_library(compare STATIC Comparison.cpp)
-
 target_include_directories(compare PRIVATE ${CMAKE_SOURCE_DIR}/include)
-
 target_link_libraries(main PRIVATE compare)
+
+add_library(concurrent STATIC ConCurrent.cpp)
+target_include_directories(concurrent PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(main PRIVATE concurrent)
 
 
 # 查找Boost库并添加链接
