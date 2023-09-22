@@ -177,12 +177,24 @@ class BPlusTree {
   }
 
  public:
+  int lockCount = 0;
+  std::shared_mutex treeMutex;
   BPlusTree();
   ~BPlusTree();
 
   // 查找指定的数据
   bool Search(foo data, char* sPath);
-  LeafNode<foo>* SearchLeafNode(foo key);         //用于插入查找
+  LeafNode<foo>* SearchLeafNode(foo key);  //用于插入查找
+
+  LeafNode<foo>* SearchLeafNodeR(
+      foo key,
+      std::queue<std::unique_lock<std::shared_mutex>*>&
+          queue);  //用于插入查找（读锁）
+
+  LeafNode<foo>* SearchLeafNodeW(
+      foo key,
+      std::queue<std::unique_lock<std::shared_mutex>*>&
+          queue);  //用于插入查找（写锁）
   LeafNode<foo>* SearchDelNode(foo key, int& i);  //用于删除查找
 
   // 插入指定的数据
@@ -193,7 +205,8 @@ class BPlusTree {
   // 删除指定的数据
   bool Delete(foo data);
   //递归删除中间节点
-  bool DelInterNode(InterNode<foo>* pNode, foo key);
+  bool DelInterNode(InterNode<foo>* pNode, foo key,
+                    std::queue<InterNode<foo>*>* delNodeQueue);
   //更新父亲键值
   void UpdateKey(foo key, Node<foo>* oldNode, int x);
   //删除时叶子节点借兄弟
@@ -218,6 +231,9 @@ class BPlusTree {
   void SetMinKey(int i) { ORDER = i; }
   int GetMinKey() { return ORDER; }
 
+  //清空锁
+  void ClearLockQueue(std::queue<std::unique_lock<std::shared_mutex>*>* queue);
+
  private:
   LeafNode<foo>* m_LeafHead;  //叶子节点链表表头
   LeafNode<foo>* m_LeafTail;  //叶子节点链表表尾
@@ -234,6 +250,7 @@ void thread_entry();
 void Tree(BPlusTree<int>* x);
 void TreeS(BPlusTree<std::string>* sx);
 void compare();
+void ThreadReg();
 
 /*-------------------------Node函数定义---------------------------*/
 
@@ -693,6 +710,138 @@ LeafNode<foo>* BPlusTree<foo>::SearchLeafNode(foo key) {
   return (LeafNode<foo>*)pNode;
 }
 
+//清空锁队列
+template <typename foo>
+void BPlusTree<foo>::ClearLockQueue(
+    std::queue<std::unique_lock<std::shared_mutex>*>* queue) {
+  while (!queue->empty()) {
+    std::unique_lock<std::shared_mutex>* uLock;
+    uLock = queue->front();
+    queue->pop();
+    uLock->unlock();
+    lockCount--;
+    delete uLock;
+  }
+}
+
+//插入找叶子节点(读锁)
+template <typename foo>  //
+LeafNode<foo>* BPlusTree<foo>::SearchLeafNodeR(
+    foo key, std::queue<std::unique_lock<std::shared_mutex>*>& queue) {
+  std::shared_lock<std::shared_mutex>* lockF = NULL;
+  std::shared_lock<std::shared_mutex>* lockS = NULL;
+  std::shared_lock<std::shared_mutex>* temp = NULL;
+  std::unique_lock<std::shared_mutex>* wLeaf = NULL;
+
+  int i = 0, locks = 0, unlocks = 0;
+
+  //获取根节点
+  Node<foo>* pNode = GetRoot();
+  Node<foo>* pParent = NULL;
+
+  if (pNode == NULL) {
+    return NULL;
+  }
+
+  //根节点不是叶子节点：开始的加锁
+  lockF = new std::shared_lock<std::shared_mutex>(pNode->nodeMutex);
+  lockS = lockF;
+  locks++;
+
+  if (pNode->GetNodeType() != 2) {
+    int i = BinALG(pNode, pNode->GetCount(), key);
+    for (i = 0; (i < pNode->GetCount()) && (key >= pNode->GetKeyValue(i)); i++)
+      ;
+    pParent = pNode;
+    pNode = pNode->GetChild(i);
+    lockS = new std::shared_lock<std::shared_mutex>(pNode->nodeMutex);
+    locks++;
+  }
+
+  //查找过程中循环加锁解锁
+  while (pNode->GetNodeType() != 2) {
+    int i = BinALG(pNode, pNode->GetCount(), key);
+    for (i = 0; (i < pNode->GetCount()) && (key >= pNode->GetKeyValue(i)); i++)
+      ;
+    temp = lockF;
+    pParent = pNode;
+    pNode = pNode->GetChild(i);
+    lockF = lockS;
+    lockS = new std::shared_lock<std::shared_mutex>(pNode->nodeMutex);
+    locks++;
+
+    temp->unlock();
+    unlocks++;
+
+    delete temp;
+  }
+
+  //根节点不是叶子节点：查找到最后的解锁
+  if (pParent != NULL) {
+    lockF->unlock();
+    unlocks++;
+
+    delete lockF;
+  }
+  lockS->unlock();
+  unlocks++;
+
+  delete lockS;
+  wLeaf = new std::unique_lock<std::shared_mutex>(pNode->nodeMutex);
+  lockCount++;
+  queue.push(wLeaf);
+
+  std::cout << "lock:" << locks << " unlock:" << unlocks << std::endl;
+  return (LeafNode<foo>*)pNode;
+}
+
+//插入找叶子节点(写锁)
+template <typename foo>  //
+LeafNode<foo>* BPlusTree<foo>::SearchLeafNodeW(
+    foo key, std::queue<std::unique_lock<std::shared_mutex>*>& queue) {
+  int i = 0, flag = 0;
+  std::unique_lock<std::shared_mutex>* uLock = NULL;
+
+  //获取根节点
+  Node<foo>* pNode = GetRoot();
+  if (pNode == NULL) {
+    return NULL;
+  }
+
+  //开始的加锁
+  uLock = new std::unique_lock<std::shared_mutex>(pNode->nodeMutex);
+  lockCount++;
+  queue.push(uLock);
+  if (pNode->GetKeyValue(0) == key) {
+    flag = 1;
+  }
+
+  //查找过程中循环加锁解锁
+  while (pNode->GetNodeType() != 2) {
+    int i = BinALG(pNode, pNode->GetCount(), key);
+    for (i = 0; (i < pNode->GetCount()) && (key >= pNode->GetKeyValue(i)); i++)
+      ;
+    pNode = pNode->GetChild(i);
+    if (pNode->GetKeyValue(0) == key) {
+      flag = 1;
+    }
+    if ((pNode->GetCount() < MAX_KEYNUM) && (flag == 0)) {
+      while (!queue.empty()) {
+        uLock = queue.front();
+        queue.pop();
+        uLock->unlock();
+        lockCount--;
+        delete uLock;
+      }
+    }
+    uLock = new std::unique_lock<std::shared_mutex>(pNode->nodeMutex);
+    lockCount++;
+    queue.push(uLock);
+  }
+
+  return (LeafNode<foo>*)pNode;
+}
+
 //删除查找叶子节点
 template <typename foo>
 LeafNode<foo>* BPlusTree<foo>::SearchDelNode(foo key, int& i) {
@@ -734,13 +883,32 @@ LeafNode<foo>* BPlusTree<foo>::SearchDelNode(foo key, int& i) {
 
 template <typename foo>
 bool BPlusTree<foo>::Insert(foo key, uint64_t value) {
-  LeafNode<foo>* oldNode = SearchLeafNode(key);
+  std::shared_lock<std::shared_mutex>* lockReadCur;
+  std::unique_lock<std::shared_mutex>* lockWirteCur;
+
+  std::queue<std::unique_lock<std::shared_mutex>*> lockQueue;
+  LeafNode<foo>* oldNode = SearchLeafNodeR(key, lockQueue);
   //查找合适的叶子节点插入（为空则表示树是空的,新创建一个根节点）
   if (oldNode == NULL) {
     oldNode = new LeafNode<foo>;
     m_LeafHead = oldNode;
     m_LeafTail = oldNode;
     SetRoot(oldNode);
+    oldNode->Insert(key, value);
+    return true;
+  }
+
+  //不安全（从头获取写锁）
+  if (!((oldNode->GetCount() < MAX_KEYNUM) &&
+        (oldNode->GetKeyValue(0) < key))) {
+    //释放当前写锁
+    lockWirteCur = lockQueue.front();
+    lockQueue.pop();
+    lockWirteCur->unlock();
+    delete lockWirteCur;
+
+    //整条路径重新加写锁
+    SearchLeafNodeW(key, lockQueue);
   }
 
   //插入
@@ -748,6 +916,7 @@ bool BPlusTree<foo>::Insert(foo key, uint64_t value) {
 
   // 1.叶子节点未超
   if (oldNode->GetCount() <= MAX_KEYNUM) {
+    ClearLockQueue(&lockQueue);
     return true;
   }
 
@@ -782,9 +951,13 @@ bool BPlusTree<foo>::Insert(foo key, uint64_t value) {
     pFather->SetCount(1);
 
     SetRoot(pFather);  // 指定新的根结点
+    ClearLockQueue(&lockQueue);
+
     return true;
   }
-  return InsertInterNode(pFather, leafSplitKey, newNode);
+  InsertInterNode(pFather, leafSplitKey, newNode);
+  ClearLockQueue(&lockQueue);
+  return true;
 }
 
 template <typename foo>
@@ -847,25 +1020,54 @@ bool BPlusTree<foo>::InsertInterNode(InterNode<foo>* pNode, foo key,
 */
 template <typename foo>
 bool BPlusTree<foo>::Delete(foo key) {
+  lockCount = 0;
+  std::shared_lock<std::shared_mutex>* lockReadCur = NULL;
+  std::unique_lock<std::shared_mutex>* lockWirteCur = NULL;
+
+  std::queue<std::unique_lock<std::shared_mutex>*> lockQueue;
+  while (!lockQueue.empty()) {
+    lockQueue.pop();
+  }
   // 查找理想的叶子结点
-  LeafNode<foo>* oldNode = SearchLeafNode(key);
+  LeafNode<foo>* oldNode = SearchLeafNodeR(key, lockQueue);
+  std::cout << "Queue size after searchR: " << lockQueue.size() << std::endl;
+  std::cout << "lockCount: " << lockCount << std::endl;
 
   // 如果没有找到，返回失败
   if (oldNode == NULL) {
     return false;
   }
 
+  //不安全（从头获取写锁）
+  if (!((oldNode->GetCount() > ORDER) && (oldNode->GetKeyValue(0) != key))) {
+    //释放当前写锁
+    lockWirteCur = lockQueue.front();
+    lockQueue.pop();
+    lockWirteCur->unlock();
+    lockCount--;
+    delete lockWirteCur;
+
+    //整条路径重新加写锁
+    SearchLeafNodeW(key, lockQueue);
+  }
+  std::cout << "Queue size after searchW: " << lockQueue.size() << std::endl;
+  std::cout << "lockCount: " << lockCount << std::endl;
+
   // 保存oldNode最小值信息，更新父节点键值用
   foo saveKey = oldNode->GetKeyValue(0);
 
   // 删除数据
   if ((oldNode->Delete(key)) == false) {
+    ClearLockQueue(&lockQueue);
+    std::cout << "Queue size before quit: " << lockQueue.size() << std::endl;
+    std::cout << "lockCount: " << lockCount << std::endl;
     return false;
   }
 
   // 获取父结点
   InterNode<foo>* pFather = (InterNode<foo>*)(oldNode->GetFather());
   if (NULL == pFather) {
+    ClearLockQueue(&lockQueue);
     // 此时是根节点且其所有数据均被删除
     if (oldNode->GetCount() == 0) {
       delete oldNode;
@@ -873,7 +1075,8 @@ bool BPlusTree<foo>::Delete(foo key) {
       m_LeafTail = NULL;
       SetRoot(NULL);
     }
-
+    std::cout << "Queue size before quit: " << lockQueue.size() << std::endl;
+    std::cout << "lockCount: " << lockCount << std::endl;
     return true;
   }
 
@@ -881,6 +1084,9 @@ bool BPlusTree<foo>::Delete(foo key) {
   if (oldNode->GetCount() >= ORDER) {
     //更新父亲节点
     UpdateKey(key, oldNode, 0);
+    ClearLockQueue(&lockQueue);
+    std::cout << "Queue size before quit: " << lockQueue.size() << std::endl;
+    std::cout << "lockCount: " << lockCount << std::endl;
     return true;
   }
 
@@ -890,6 +1096,9 @@ bool BPlusTree<foo>::Delete(foo key) {
 
   // 兄弟借出后能维持 对应情况1）
   if (BorrowLeafBro(oldNode, pBro, saveKey, leftOrRight) == true) {
+    ClearLockQueue(&lockQueue);
+    std::cout << "Queue size before quit: " << lockQueue.size() << std::endl;
+    std::cout << "lockCount: " << lockCount << std::endl;
     return true;
   }
 
@@ -935,12 +1144,28 @@ bool BPlusTree<foo>::Delete(foo key) {
     // 删除本结点
     delete pBro;
   }
-  return DelInterNode(pFather, delKey);
+
+  //递归向上
+  InterNode<foo>* delInterNode = NULL;
+  std::queue<InterNode<foo>*>* delNodeQueue = new std::queue<InterNode<foo>*>;
+  bool interResult;
+  interResult = DelInterNode(pFather, delKey, delNodeQueue);
+  ClearLockQueue(&lockQueue);
+  while (!delNodeQueue->empty()) {
+    delInterNode = delNodeQueue->front();
+    delNodeQueue->pop();
+    delete delInterNode;
+  }
+  delete delNodeQueue;
+  std::cout << "Queue size before quit: " << lockQueue.size() << std::endl;
+  std::cout << "lockCount: " << lockCount << std::endl;
+  return interResult;
 }
 
 //递归删除合并中间节点
 template <typename foo>
-bool BPlusTree<foo>::DelInterNode(InterNode<foo>* pNode, foo key) {
+bool BPlusTree<foo>::DelInterNode(InterNode<foo>* pNode, foo key,
+                                  std::queue<InterNode<foo>*>* delNodeQueue) {
   // 删除键，如果失败一定是没有找到，直接返回失败
   pNode->Delete(key);
 
@@ -951,7 +1176,8 @@ bool BPlusTree<foo>::DelInterNode(InterNode<foo>* pNode, foo key) {
     if (pNode->GetCount() == 0) {
       SetRoot(pNode->GetChild(0));
       pNode->GetChild(0)->SetFather(NULL);
-      delete pNode;
+      delNodeQueue->push(pNode);
+      // delete pNode;
     }
     return true;
   }
@@ -987,15 +1213,19 @@ bool BPlusTree<foo>::DelInterNode(InterNode<foo>* pNode, foo key) {
   if (leftOrRight == 1) {
     (void)pBro->Combine(pNode);
     delKey = pNode->GetKeyValue(0);
-    delete pNode;
+    delNodeQueue->push(pNode);
+
+    // delete pNode;
   } else {
     (void)pNode->Combine(pBro);
     delKey = pBro->GetKeyValue(0);
-    delete pBro;
+    delNodeQueue->push(pBro);
+
+    // delete pBro;
   }
 
   // 递归
-  return DelInterNode(pFather, delKey);
+  return DelInterNode(pFather, delKey, delNodeQueue);
 }
 
 template <typename foo>
@@ -1059,18 +1289,54 @@ void BPlusTree<foo>::UpdateKey(foo key, Node<foo>* oldNode, int x) {
 //范围查询
 template <typename foo>
 void BPlusTree<foo>::RangeQuery(foo minKey, foo maxKey) {
-  // LeafNode<foo>* pNode = m_LeafHead;
-  int t = 0;
-  // for(int i=0;pNode->GetKeyValue(int i))
+  int t = 0, lock = 0, unlock = 0;
   Node<foo>* sNode = GetRoot();
+  Node<foo>* sParent = NULL;
+  std::shared_lock<std::shared_mutex>* lockF;
+  std::shared_lock<std::shared_mutex>* lockS;
+  std::shared_lock<std::shared_mutex>* temp;
+
+  //根节点不是叶子节点：开始的加锁
+  lockF = new std::shared_lock<std::shared_mutex>(sNode->nodeMutex);
+  lock++;
+  if (sNode->GetNodeType() != 2) {
+    int i = BinALG(sNode, sNode->GetCount(), minKey);
+    sParent = sNode;
+    sNode = sNode->GetChild(i);
+    lockS = new std::shared_lock<std::shared_mutex>(sNode->nodeMutex);
+    lock++;
+  }
+
+  //查找过程中循环加锁解锁
   while (sNode->GetNodeType() != 2) {
     int i = BinALG(sNode, sNode->GetCount(), minKey);
+    temp = lockF;
+    sParent = sNode;
     sNode = sNode->GetChild(i);
+    lockF = lockS;
+    lockS = new std::shared_lock<std::shared_mutex>(sNode->nodeMutex);
+    lock++;
+    temp->unlock();
+    unlock++;
+    delete temp;
   }
+
+  //根节点不是叶子节点：查找到最后的解锁
+  if (sParent != NULL) {
+    lockF->unlock();
+    unlock++;
+    delete lockF;
+  }
+
+  //横向查找
+  lockF = lockS;
   int i = BinALG(sNode, sNode->GetCount(), minKey);
   int j = i;
   if ((sNode->GetKeyValue(i) != minKey) && (maxKey < sNode->GetKeyValue(i))) {
-    std::cout << "范围内无数据" << std::endl;
+    // std::cout << "范围内无数据" << std::endl;
+    lockS->unlock();
+    unlock++;
+    delete lockS;
   } else {
     while (sNode != NULL) {
       for (; j < sNode->GetCount(); j++) {
@@ -1084,11 +1350,31 @@ void BPlusTree<foo>::RangeQuery(foo minKey, foo maxKey) {
         }
       }
       j = 0;
+      lockF = lockS;
+      if (sNode->GetRightBro() != NULL) {
+        lockS = new std::shared_lock<std::shared_mutex>(
+            sNode->GetRightBro()->nodeMutex);
+        lock++;
+      }
       sNode = sNode->GetRightBro();
+      lockF->unlock();
+      unlock++;
+      delete lockF;
+      // if (sNode->GetRightBro() != NULL) {
+      //   lockF = lockS;
+      //   lockS = new
+      //   std::shared_lock<std::shared_mutex>(sNode->GetRightBro()); sNode =
+      //   sNode->GetRightBro(); lockF->unlock(); delete lockF;
+      // } else {
+      //   sNode = sNode->GetRightBro();
+      //   lockS->unlock();
+      //   delete lockS;
+      // }
     }
   }
   std::cout << std::endl;
   std::cout << "找到了" << t << "个数据" << std::endl;
+  std::cout << "lock:" << lock << " unlock:" << unlock << std::endl;
 }
 
 //删除整颗树

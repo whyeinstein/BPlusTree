@@ -138,9 +138,10 @@ void Tree(BPlusTree<int>* x) {
 
   while (1) {
     int choice;
-    std::cout << "请选择操作：1插入，2范围查询，3删除，4打印，5清空整颗树,"
-                 "6顺序插入1～n,7随即插入1～n，8序列化，100为测试，0退出"
-              << std::endl;
+    std::cout
+        << "请选择操作：1插入，2范围查询，3删除，4打印，5清空整颗树,"
+           "6顺序插入1～n,7随即插入1～n，8序列化，9随机删除，100为测试，0退出"
+        << std::endl;
     std::cin >> choice;
     if (choice == 0) {
       break;
@@ -224,7 +225,19 @@ void Tree(BPlusTree<int>* x) {
       case 8:
         Save(x);
         break;
+      case 9:
+        int dn;
+        std::cout << "请输入随机个数" << std::endl;
+        std::cin >> dn;
 
+        // for (int i = 0; i < dn; i++) {
+        //   std::cout << randomIns[i] << " ";
+        // }
+        std::cout << std::endl;
+        for (int i = 0; i < dn; i++) {
+          x->Delete(i + 1);
+        }
+        break;
       //性能测试
       case 100:
         thread_entry();

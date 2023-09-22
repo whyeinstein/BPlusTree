@@ -22,7 +22,7 @@ int main() {
     std::cout << "输入0退出，输入1创建树（int），输入2创建树（string），输入3操"
                  "作树（int），输入4操作树（string）,"
                  "\n输入5删除树（int），输入6删除树（string）,7反序列化(int),"
-                 "8反序列化(string),9与STX B+Tree比较"
+                 "8反序列化(string),9与STX B+Tree比较，10并发"
               << std::endl;
 
     std::cin >> exit;
@@ -135,6 +135,9 @@ int main() {
         delete x;
         delete sx;
         compare();
+        break;
+      case 10:
+        ThreadReg();
         break;
       default:
         break;
