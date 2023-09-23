@@ -5,3 +5,4 @@ gprofRecord.txt
 gmon.out
 valReport
 test*.txt
+gprof2dot.py

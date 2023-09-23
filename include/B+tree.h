@@ -192,7 +192,7 @@ class BPlusTree {
           queue);  //用于插入查找（读锁）
 
   LeafNode<foo>* SearchLeafNodeW(
-      foo key,
+      foo leafNodeKey, foo key,
       std::queue<std::unique_lock<std::shared_mutex>*>&
           queue);  //用于插入查找（写锁）
   LeafNode<foo>* SearchDelNode(foo key, int& i);  //用于删除查找
@@ -798,7 +798,8 @@ LeafNode<foo>* BPlusTree<foo>::SearchLeafNodeR(
 //插入找叶子节点(写锁)
 template <typename foo>  //
 LeafNode<foo>* BPlusTree<foo>::SearchLeafNodeW(
-    foo key, std::queue<std::unique_lock<std::shared_mutex>*>& queue) {
+    foo leafNodeKey, foo key,
+    std::queue<std::unique_lock<std::shared_mutex>*>& queue) {
   int i = 0, flag = 0;
   std::unique_lock<std::shared_mutex>* uLock = NULL;
 
@@ -822,7 +823,8 @@ LeafNode<foo>* BPlusTree<foo>::SearchLeafNodeW(
     for (i = 0; (i < pNode->GetCount()) && (key >= pNode->GetKeyValue(i)); i++)
       ;
     pNode = pNode->GetChild(i);
-    if (pNode->GetKeyValue(0) == key) {
+    if ((pNode->GetKeyValue(0) == key) ||
+        (pNode->GetKeyValue(0) != leafNodeKey)) {
       flag = 1;
     }
     if ((pNode->GetCount() < MAX_KEYNUM) && (flag == 0)) {
@@ -908,7 +910,7 @@ bool BPlusTree<foo>::Insert(foo key, uint64_t value) {
     delete lockWirteCur;
 
     //整条路径重新加写锁
-    SearchLeafNodeW(key, lockQueue);
+    SearchLeafNodeW(key, key, lockQueue);
   }
 
   //插入
@@ -1048,7 +1050,7 @@ bool BPlusTree<foo>::Delete(foo key) {
     delete lockWirteCur;
 
     //整条路径重新加写锁
-    SearchLeafNodeW(key, lockQueue);
+    SearchLeafNodeW(oldNode->GetKeyValue(0), key, lockQueue);
   }
   std::cout << "Queue size after searchW: " << lockQueue.size() << std::endl;
   std::cout << "lockCount: " << lockCount << std::endl;
@@ -1146,9 +1148,9 @@ bool BPlusTree<foo>::Delete(foo key) {
   }
 
   //递归向上
+  bool interResult;
   InterNode<foo>* delInterNode = NULL;
   std::queue<InterNode<foo>*>* delNodeQueue = new std::queue<InterNode<foo>*>;
-  bool interResult;
   interResult = DelInterNode(pFather, delKey, delNodeQueue);
   ClearLockQueue(&lockQueue);
   while (!delNodeQueue->empty()) {
@@ -1360,16 +1362,6 @@ void BPlusTree<foo>::RangeQuery(foo minKey, foo maxKey) {
       lockF->unlock();
       unlock++;
       delete lockF;
-      // if (sNode->GetRightBro() != NULL) {
-      //   lockF = lockS;
-      //   lockS = new
-      //   std::shared_lock<std::shared_mutex>(sNode->GetRightBro()); sNode =
-      //   sNode->GetRightBro(); lockF->unlock(); delete lockF;
-      // } else {
-      //   sNode = sNode->GetRightBro();
-      //   lockS->unlock();
-      //   delete lockS;
-      // }
     }
   }
   std::cout << std::endl;
